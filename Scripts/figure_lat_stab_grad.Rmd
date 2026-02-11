@@ -1,0 +1,513 @@
+---
+title: "Figure: latitudinal stability gradient"
+output: html_document
+date: "2025-12-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, fig.width = 10)
+```
+
+```{r}
+library(tidyverse)
+library(FAVA)
+library(patchwork)
+library(broom)
+```
+
+```{r}
+triton <- data.table::fread("../Data_raw/Data_Triton_v2_Maike_compressed/Triton_Binned_Trimmed.csv")
+
+ecogroup <- data.table::fread("../Data_raw/Data_Triton_v2_Maike_compressed/Ecogroup.csv")
+
+data_pal = PNWColors::pnw_palette("Bay", 3) %>% `names<-`(c("ecogroup", "morphogroup", "species"))
+
+```
+
+# Make exactly the same color palette for the species/ecogroups/morphgroups 
+
+(we wont use these data sets otherwise)
+```{r}
+species_abundances_0.5my_alldeg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  transmute(species,
+            age = round(age*2)/2, 
+            abundance)  %>%
+  group_by(age, species) %>%
+  summarise(abundance = sum(abundance)) %>%
+  pivot_wider(names_from = species, 
+              values_from = abundance, 
+              values_fill = 0)
+
+ecogroup_abundances_0.5my_alldeg = triton %>% 
+  left_join(ecogroup) %>%
+  filter(`Macro.micro` == "Macroperforate") %>%
+  transmute(ecogroup = `Ecogroup(s)`,
+            age = round(age*2)/2, 
+            abundance)  %>%
+  group_by(age, ecogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(ecogroup !="") %>%
+  pivot_wider(names_from = ecogroup, 
+              values_from = abundance, 
+              values_fill = 0)
+
+morphogroup_abundances_0.5my_alldeg = triton %>% 
+  left_join(ecogroup) %>%
+  filter(`Macro.micro` == "Macroperforate") %>%
+  transmute(morphogroup = factor(Morphogroup, levels = as.character(1:19), ordered=TRUE),
+            age = round(age*2)/2, 
+            abundance)  %>%
+  group_by(age, morphogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(morphogroup !="") %>%
+  pivot_wider(names_from = morphogroup, 
+              values_from = abundance, 
+              values_fill = 0)
+
+# Normalize rows to generate relative abundances
+species_relab_0.5my_alldeg = species_abundances_0.5my_alldeg
+species_relab_0.5my_alldeg[,-1] = species_abundances_0.5my_alldeg[,-1] /rowSums(species_abundances_0.5my_alldeg[,-1])
+
+ecogroup_relab_0.5my_alldeg = ecogroup_abundances_0.5my_alldeg
+ecogroup_relab_0.5my_alldeg[,-1] = ecogroup_abundances_0.5my_alldeg[,-1] /rowSums(ecogroup_abundances_0.5my_alldeg[,-1])
+
+morphogroup_relab_0.5my_alldeg = morphogroup_abundances_0.5my_alldeg
+morphogroup_relab_0.5my_alldeg[,-1] = morphogroup_abundances_0.5my_alldeg[,-1] /rowSums(morphogroup_abundances_0.5my_alldeg[,-1])
+
+
+comp_time_data = rbind(species_relab_0.5my_alldeg %>% arrange(age) %>% 
+                         pivot_longer(cols = -1, names_to = "category", values_to = "abundance") %>% 
+                         mutate(data_type = "Species"), 
+                       
+                       ecogroup_relab_0.5my_alldeg %>% arrange(age) %>% 
+                         pivot_longer(cols = -1, names_to = "category", values_to = "abundance") %>% 
+                         mutate(data_type = "Ecogroup"),
+                       
+                       morphogroup_relab_0.5my_alldeg %>% arrange(age) %>% 
+                         pivot_longer(cols = -1, names_to = "category", values_to = "abundance") %>% 
+                         mutate(data_type = "Morphogroup") ) %>% 
+  filter(abundance > 0) %>% ungroup
+
+comp_time_data$category = paste0(comp_time_data$data_type, comp_time_data$category)
+
+comp_time_data$category =  factor(comp_time_data$category, ordered = TRUE, 
+                                  c(paste0("Species", colnames(species_relab_0.5my_alldeg)[-1]),
+                                    paste0("Ecogroup", colnames(ecogroup_relab_0.5my_alldeg)[-1]),
+                                    paste0("Morphogroup", colnames(morphogroup_relab_0.5my_alldeg)[-1] %>% rev)) %>%
+                                    rev)
+# levels = comp_time_data %>% group_by(category)%>% 
+#   summarize(total = sum(abundance)) %>% 
+#   arrange(total) %>% select(category) %>% unlist)
+
+
+pal_all = c(viridisLite::viridis(n=ncol(species_relab_0.5my_alldeg) -1) %>%
+              `names<-`(filter(comp_time_data, data_type == "Species") %>% 
+                          pull(category) %>% 
+                          sort %>%
+                          unique),
+            viridisLite::viridis(n=ncol(ecogroup_relab_0.5my_alldeg) -1) %>%
+              `names<-`(filter(comp_time_data, data_type == "Ecogroup")  %>% 
+                          pull(category) %>% 
+                          sort %>%
+                          unique),
+            viridisLite::viridis(n=ncol(morphogroup_relab_0.5my_alldeg) -1) %>%
+              `names<-`(filter(comp_time_data, data_type == "Morphogroup") %>% 
+                          pull(category) %>% 
+                          sort %>%
+                          unique))
+
+```
+
+
+# Analyze the data in bins 5 million years wide and 5 degress latitude wide
+
+We break down the data into both spatial and temporal bins, whose definitions are visualized in the following plots. 
+
+```{r 5 degree/million year bins}
+# Define bins for the age and paleo latitude 
+age_bins = data.frame(age = 0:66, 
+                      age_bin = rep(seq(0,66,5),each=5)[1:67])
+ggplot(age_bins, aes(x=age,y=age_bin)) +
+  geom_line(aes(x=0:66, y=0:66), color="red")+
+  geom_line() + geom_point() 
+
+lat_bins = data.frame(pal.lat = -75:88, 
+                      lat_bin = rep(seq(-76,88,5),each=5)[-165] + 1) %>% 
+  mutate(lat_bin_label = paste0("[",lat_bin, ", ", lat_bin+4, "]"))
+ggplot(data=lat_bins, aes(x=pal.lat,y=lat_bin)) +
+  geom_line() + geom_point()+
+  geom_line(data = data.frame(pal.lat=-76:88, lat_bin=-76:88), color="red", alpha=0.5)
+
+
+# ------------------------------------------------------------------------------
+# Make a table of species counts for each age_bin/lat_bin combo
+species_abundances_5my_5deg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  transmute(species, 
+            age = round(age), 
+            pal.lat = round(pal.lat), 
+            abundance)  %>%
+  left_join(age_bins) %>%
+  left_join(lat_bins) %>% 
+  group_by(age_bin, lat_bin, lat_bin_label, species) %>%
+  summarise(abundance = sum(abundance)) %>%
+  pivot_wider(names_from = species, 
+              values_from = abundance, 
+              values_fill = 0)
+
+# Remove the 15 age/lat combos with counts < 5
+# sum(rowSums(species_abundances_5my_5deg[,-c(1:3)])<5)
+species_abundances_5my_5deg = species_abundances_5my_5deg[rowSums(species_abundances_5my_5deg[,-c(1:3)])>=5,]
+
+# Normalize rows to generate relative abundances
+species_relab_5my_5deg = species_abundances_5my_5deg
+species_relab_5my_5deg[,-c(1:3)] = species_abundances_5my_5deg[,-c(1:3)] /rowSums(species_abundances_5my_5deg[,-c(1:3)])
+
+
+# ------------------------------------------------------------------------------
+# Make a table of ecogroup counts for each age_bin/lat_bin combo
+ecogroup_abundances_5my_5deg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  left_join(ecogroup) %>%
+  transmute(ecogroup = `Ecogroup(s)`, 
+            age = round(age), 
+            pal.lat = round(pal.lat), 
+            abundance)  %>%
+  left_join(age_bins) %>%
+  left_join(lat_bins) %>% 
+  group_by(age_bin, lat_bin, lat_bin_label, ecogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(ecogroup !="") %>%
+  pivot_wider(names_from = ecogroup, 
+              values_from = abundance, 
+              values_fill = 0)
+
+# Remove the 15 age/lat combos with counts < 5
+# sum(rowSums(ecogroup_abundances_5my_5deg[,-c(1:3)])<5)
+ecogroup_abundances_5my_5deg = ecogroup_abundances_5my_5deg[rowSums(ecogroup_abundances_5my_5deg[,-c(1:3)])>=5,]
+
+# Normalize rows to generate relative abundances
+ecogroup_relab_5my_5deg = ecogroup_abundances_5my_5deg
+ecogroup_relab_5my_5deg[,-c(1:3)] = ecogroup_abundances_5my_5deg[,-c(1:3)] /rowSums(ecogroup_abundances_5my_5deg[,-c(1:3)])
+
+# ------------------------------------------------------------------------------
+# Make a table of morphogroup counts for each age_bin/lat_bin combo
+morphogroup_abundances_5my_5deg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  left_join(ecogroup) %>%
+  transmute(morphogroup = Morphogroup, 
+            age = round(age), 
+            pal.lat = round(pal.lat), 
+            abundance)  %>%
+  left_join(age_bins) %>%
+  left_join(lat_bins) %>% 
+  group_by(age_bin, lat_bin, lat_bin_label, morphogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(morphogroup !="") %>%
+  pivot_wider(names_from = morphogroup, 
+              values_from = abundance, 
+              values_fill = 0)
+
+# Remove the 15 age/lat combos with counts < 5
+# sum(rowSums(morphogroup_abundances_5my_5deg[,-c(1:3)])<5)
+morphogroup_abundances_5my_5deg = morphogroup_abundances_5my_5deg[rowSums(morphogroup_abundances_5my_5deg[,-c(1:3)])>=5,]
+
+# Normalize rows to generate relative abundances
+morphogroup_relab_5my_5deg = morphogroup_abundances_5my_5deg
+morphogroup_relab_5my_5deg[,-c(1:3)] = morphogroup_abundances_5my_5deg[,-c(1:3)] /rowSums(morphogroup_abundances_5my_5deg[,-c(1:3)])
+
+# ------------------------------------------------------------------------------
+# FILTER DATA SETS SO THAT EACH LAT BIN CONTAINS AT LEAST 10 YEAR BINS 
+species_relab_5my_5deg_filtered = species_relab_5my_5deg %>%
+                      filter(lat_bin %in% 
+                               sort(unique(species_relab_5my_5deg$lat_bin))[
+                                 table(species_relab_5my_5deg$lat_bin) >= 10]) 
+ecogroup_relab_5my_5deg_filtered = ecogroup_relab_5my_5deg %>%
+                      filter(lat_bin %in% 
+                               sort(unique(species_relab_5my_5deg$lat_bin))[
+                                 table(species_relab_5my_5deg$lat_bin) >= 10]) 
+morphogroup_relab_5my_5deg_filtered = morphogroup_relab_5my_5deg %>%
+                      filter(lat_bin %in% 
+                               sort(unique(species_relab_5my_5deg$lat_bin))[
+                                 table(species_relab_5my_5deg$lat_bin) >= 10]) 
+```
+
+```{r}
+# Make a dataset that puts them all together
+comp_time_lat = rbind(species_relab_5my_5deg_filtered %>% 
+                         pivot_longer(cols = -c(age_bin, lat_bin, lat_bin_label), names_to = "category", values_to = "abundance") %>% 
+                         mutate(data_type = "Species"), 
+                       
+                       ecogroup_relab_5my_5deg_filtered %>% 
+                         pivot_longer(cols = -c(age_bin, lat_bin, lat_bin_label), names_to = "category", values_to = "abundance") %>% 
+                         mutate(data_type = "Ecogroup"),
+                       
+                       morphogroup_relab_5my_5deg_filtered %>% 
+                         pivot_longer(cols = -c(age_bin, lat_bin, lat_bin_label), names_to = "category", values_to = "abundance") %>% 
+                         mutate(data_type = "Morphogroup") ) %>% 
+  filter(abundance > 0) %>% ungroup
+
+comp_time_lat$category = paste0(comp_time_lat$data_type, comp_time_lat$category)
+comp_time_lat$category = factor(comp_time_lat$category, ordered=TRUE,
+                                levels = pal_all %>% names)
+comp_time_lat$lat_bin_label = factor(comp_time_lat$lat_bin_label, ordered=TRUE, 
+                                     levels = lat_bins$lat_bin_label %>% unique)
+
+# comp_time_lat$category =  factor(comp_time_lat$category, ordered = TRUE, 
+#                                   c(paste0("Species", colnames(species_relab_5my_5deg_filtered)[-c(1,2)]),
+#                                     paste0("Ecogroup", colnames(ecogroup_relab_5my_5deg_filtered)[-c(1,2)]),
+#                                     paste0("Morphogroup", colnames(morphogroup_relab_5my_5deg_filtered)[-c(1,2)] %>% rev)) %>%
+#                                     rev)
+```
+
+### Heterogeneity over time within each paleo latitude bin
+```{r}
+comp_time_lat_plot = ggplot(comp_time_lat,
+                   aes(x = age_bin, y = abundance, fill = category, color = category)) + 
+  geom_bar(stat = "identity") + 
+  theme_bw() + 
+  ggh4x::facet_grid2(data_type~lat_bin_label, 
+                     strip = ggh4x::strip_themed(text_y=lapply(data_pal, function(col) element_text(color = col, face = "bold")))) + 
+  theme(legend.position = "none", strip.background = element_blank()) + 
+  scale_fill_manual(values = pal_all)+ 
+  scale_color_manual(values = pal_all) + ylab("Relative abundance") + xlab("Million years ago") + 
+  scale_x_continuous(limits = c(66.5,-0.5), breaks = c(60,30,0), trans = "reverse") + 
+  scale_y_continuous(breaks = c(0,.5,1))
+
+comp_time_lat_plot
+
+# ggsave("../Figures/relab_time_latbin.png", comp_time_lat_plot, width = 41, height = 11, scale=0.3)
+```
+
+## Compute FAVA in sliding windows across time windows for each latitude bin
+
+This analysis computes FAVA in sliding window four samples wide.
+
+```{r}
+species_age.windows = 
+  FAVA::window_fava(relab_matrix = species_relab_5my_5deg_filtered,
+                    window_size = 4,
+                    K = 335,
+                    group = "lat_bin_label",
+                    time = "age_bin")
+
+ecogroup_age.windows = 
+  FAVA::window_fava(relab_matrix = ecogroup_relab_5my_5deg_filtered,
+                    window_size = 4,
+                    K = 18,
+                    group = "lat_bin_label",
+                    time = "age_bin")
+
+morphogroup_age.windows = 
+  FAVA::window_fava(relab_matrix = morphogroup_relab_5my_5deg_filtered,
+                    window_size = 4,
+                    K = 19,
+                    group = "lat_bin_label",
+                    time = "age_bin")
+
+
+age.windows_all = morphogroup_age.windows$window_data %>%
+  transmute(group, window_index, w1, w2, w3, w4, morphogroup = FAVA) %>% 
+  left_join(ecogroup_age.windows$window_data %>% 
+              transmute(group, window_index, w1, w2, w3, w4, ecogroup = FAVA)) %>% 
+  left_join(species_age.windows$window_data %>% 
+              transmute(group, window_index, w1, w2, w3, w4, species = FAVA)) %>%
+  pivot_longer(cols = c(morphogroup, ecogroup, species), 
+               names_to = "data", values_to = "FAVA")  %>% 
+  pivot_longer(cols = c(w1, w2, w3, w4), names_to = "position", values_to = "mya")
+
+age.windows_all$group = factor(age.windows_all$group, ordered=TRUE, levels = unique(lat_bins$lat_bin_label))
+
+
+lat.stab.grad.panels = ggplot(age.windows_all %>% 
+                                mutate(data = stringr::str_to_title(data)))+ 
+  geom_smooth(method = "lm", aes(x = mya, y = FAVA), linewidth = 0.3, color = "black")  + 
+  geom_line(aes(x = mya, y = FAVA, 
+                color = data, 
+                group = paste0(window_index, group, data, FAVA)),
+            linewidth = 1, alpha=0.6) + theme_bw() + 
+  ggh4x::facet_grid2(data~group, 
+                     strip = ggh4x::strip_themed(text_y=lapply(data_pal, function(col) element_text(color = col, face = "bold"))))+ 
+  theme(legend.position = "none", strip.background = element_blank()) + 
+  scale_x_reverse(breaks = c(60, 30, 0))+ 
+  scale_color_manual(values = data_pal %>% `names<-`(c("Ecogroup", "Morphogroup", "Species")), guide="none") + 
+  xlab("Million years ago")
+lat.stab.grad.panels
+
+# ggsave("../Figures/lat_stab_grad_slopes_5my.png", lat.stab.grad.panels, width = 41, height = 12, scale = 0.3)
+```
+
+
+# Make panels with relative abundances and sliding windows
+```{r}
+panels = (comp_time_lat_plot /  lat.stab.grad.panels + ylab("Temporal FAVA")) + patchwork::plot_annotation(tag_levels = "A")
+
+# ggsave("../Figures/lat_stab_grad_supplement.png", panels, width=42, height = 24, scale=0.3)
+```
+
+```{r}
+# Slopes for species
+species_nested_age.windows <- species_age.windows$window_data %>% 
+  pivot_longer(cols = w1:w4, names_to = "index", values_to = "mya") %>% 
+  transmute(pal.lat = group, FAVA, mya) %>%
+  nest(data = -pal.lat) %>%
+  mutate(pal.lat = pal.lat %>% stringr::str_split_i(pattern = c("[\\[,\\]]+"), 2) %>% as.numeric)
+
+species_slopes_by_lat <- species_nested_age.windows %>%
+  mutate(model = map(data, ~lm(FAVA ~ mya, data = .)))  %>%
+  mutate(results = map(model, tidy)) %>%
+  unnest(results)  %>% filter(term == "mya") %>% 
+  transmute(pal.lat, slope=-estimate, p.value, data = "species")
+# ^ I use the negative of the slope here because time is going backwards
+
+
+# Slopes for ecogroups
+ecogroup_nested_age.windows <- ecogroup_age.windows$window_data %>% 
+  pivot_longer(cols = w1:w4, names_to = "index", values_to = "mya") %>% 
+  transmute(pal.lat = group, FAVA, mya) %>%
+  nest(data = -pal.lat) %>%
+  mutate(pal.lat = pal.lat %>% stringr::str_split_i(pattern = c("[\\[,\\]]+"), 2) %>% as.numeric)
+
+ecogroup_slopes_by_lat <- ecogroup_nested_age.windows %>%
+  mutate(model = map(data, ~lm(FAVA ~ mya, data = .)))  %>%
+  mutate(results = map(model, tidy)) %>%
+  unnest(results)  %>% filter(term == "mya") %>% 
+  transmute(pal.lat, slope=-estimate, p.value, data = "ecogroup")
+# ^ I use the negative of the slope here because time is going backwards
+
+
+# Slopes for morphogroups
+morphogroup_nested_age.windows <- morphogroup_age.windows$window_data %>% 
+  pivot_longer(cols = w1:w4, names_to = "index", values_to = "mya") %>% 
+  transmute(pal.lat = group, FAVA, mya) %>%
+  nest(data = -pal.lat) %>%
+  mutate(pal.lat = pal.lat %>% stringr::str_split_i(pattern = c("[\\[,\\]]+"), 2) %>% as.numeric)
+
+morphogroup_slopes_by_lat <- morphogroup_nested_age.windows %>%
+  mutate(model = map(data, ~lm(FAVA ~ mya, data = .)))  %>%
+  mutate(results = map(model, tidy)) %>%
+  unnest(results)  %>% filter(term == "mya") %>% 
+  transmute(pal.lat, slope=-estimate, p.value, data = "morphogroup")
+# ^ I use the negative of the slope here because time is going backwards
+
+all_slopes_by_lat = rbind(ecogroup_slopes_by_lat, 
+                          morphogroup_slopes_by_lat, 
+                          species_slopes_by_lat)
+
+# Fit quadratic and abs models to each data set 
+quadratic_model_species <- lm(slope ~ pal.lat + I(pal.lat^2), data = species_slopes_by_lat)
+quadratic_model_ecogroup <- lm(slope ~ pal.lat + I(pal.lat^2), data = ecogroup_slopes_by_lat)
+quadratic_model_morphogroup <- lm(slope ~ pal.lat + I(pal.lat^2), data = morphogroup_slopes_by_lat)
+
+summary(quadratic_model_species)
+summary(quadratic_model_ecogroup)
+summary(quadratic_model_morphogroup)
+
+stargazer::stargazer(quadratic_model_ecogroup, quadratic_model_morphogroup, quadratic_model_species)
+
+num_fun = function(numb) formatC(numb, format = "e", digits = 2)
+
+modelsummary::modelsummary(list(Ecogroup = quadratic_model_ecogroup, Morphogroup = quadratic_model_morphogroup, Species = quadratic_model_species), fmt = num_fun, output = "../Data_processed/quadratic_model_results.xlsx") 
+
+# abs_model_species <- lm(slope ~ pal.lat + abs(pal.lat), data = species_slopes_by_lat)
+# abs_model_ecogroup <- lm(slope ~ pal.lat + abs(pal.lat), data = ecogroup_slopes_by_lat)
+# abs_model_morphogroup <- lm(slope ~ pal.lat + abs(pal.lat), data = morphogroup_slopes_by_lat)
+# 
+# summary(abs_model_species)
+# summary(abs_model_ecogroup)
+# summary(abs_model_morphogroup)
+```
+
+```{r}
+
+slopes_plot = ggplot(all_slopes_by_lat %>% mutate(data = stringr::str_to_title(data)), aes(x = pal.lat, y = slope, color = data)) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) + 
+  stat_smooth(method = "glm", formula = y ~ x + I(x^2), alpha=0.3)+ 
+  geom_point(size=3, alpha=0.75) +
+  # geom_point(size=2, aes(color = data)) + 
+  xlab("Paleo latitude") + 
+  ylab("Slope:\n[change in FAVA] / [change in time (mya)]") +
+  theme_bw()+ 
+  scale_x_continuous(breaks = seq(-60,60,10)) + 
+  scale_color_manual(values = data_pal %>% `names<-`(stringr::str_to_title(names(data_pal)))) + 
+  theme(legend.title = element_blank(), legend.position = c(0.4, 0.8))
+
+slopes_plot
+# ggsave("../Figures/lat_stab_grad.png", slopes_plot, width=20, height=12, scale=0.3)
+
+
+```
+
+
+```{r, fig.width=10, fig.height=8}
+# Calculate the predicted slopes for each latitude bin
+lat.range = seq(min(all_slopes_by_lat$pal.lat), max(all_slopes_by_lat$pal.lat))
+
+predicted_scores_quadratic <- data.frame(
+  pal.lat = lat.range, 
+  species = predict(quadratic_model_species, 
+                    newdata = data.frame(pal.lat = lat.range)), 
+  ecogroup = predict(quadratic_model_ecogroup, 
+                     newdata = data.frame(pal.lat = lat.range)), 
+  morphogroup = predict(quadratic_model_morphogroup, 
+                        newdata = data.frame(pal.lat = lat.range))) %>% 
+  pivot_longer(-pal.lat, names_to = "data", values_to = "slope")
+
+```
+
+I next separate each data type, so there's a bit less going on: 
+
+```{r, fig.height=8}
+slopes_plot_pvals = ggplot(all_slopes_by_lat %>% mutate(data = stringr::str_to_title(data)), aes(x = pal.lat, y = slope)) +
+  geom_hline(yintercept = 0, color = "#9E9E9E") +
+  geom_vline(xintercept = 0, color = "#9E9E9E") + 
+  geom_line(data =predicted_scores_quadratic %>% mutate(data = stringr::str_to_title(data)), color ="black", linewidth = 1)+
+  geom_point(size=3, aes(color = ifelse(p.value<0.001, "p<0.001", ifelse(p.value<0.01, "p<0.01",  ifelse(p.value<0.05, "p<0.05", ifelse(p.value<0.1, "p<0.1", "p>0.1")))))) +
+  # geom_point(size=2, aes(color = data)) + 
+  xlab("Paleo Latitude") + ylab("Slope:\n[change in tFAVA] / [change in time (mya)]") +
+  theme_bw()+ 
+  scale_color_manual(values=rev(viridis::viridis(6))[c(1:4,6)], name = "Slope\nSignificance")+
+  # scale_color_viridis_c(option = "turbo") + 
+  scale_x_continuous(breaks = seq(-60,60,10)) +
+ggh4x::facet_grid2(.~data, 
+                     strip = ggh4x::strip_themed(text_x=lapply(data_pal, function(col) element_text(color = col, face = "bold", size = 12))))+ 
+  theme(strip.background = element_blank())
+
+slopes_plot_pvals
+
+# ggsave("../Figures/lat_stab_grad_pvals.png", slopes_plot_pvals, width=35, height=10, scale=0.3)
+
+```
+
+# Is there a relationship between FAVA and the sampling effort in a window for these data? 
+```{r}
+sampling_slopes_lat = species_abundances_5my_5deg %>% 
+  pivot_longer(cols = -c(1:3), names_to = "species", values_to = "abundance") %>% 
+  group_by(lat_bin) %>% summarize(total = sum(abundance)) %>% 
+  left_join(all_slopes_by_lat, by = c("lat_bin" = "pal.lat")) %>% 
+  filter(!is.na(slope))
+
+sampling_plot= ggplot(sampling_slopes_lat, aes(x = total, y = slope)) + 
+  geom_point(aes(fill = lat_bin), shape = 21, size = 3, alpha = 0.8) + 
+  theme_bw() + 
+  scale_x_log10() + 
+  # stat_smooth(method="lm", alpha = 0.1, color = "grey") + 
+  ggpubr::stat_cor() +
+  facet_grid(~data) + 
+  # scale_color_manual(values = data_pal, guide = "none") + 
+  xlab("Total foraminifera abundance in paleolatitude bin") + 
+    ylab("Slope:\n[change in tFAVA] / [change in time (mya)]")+ 
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(11, "Spectral"), 
+                       limits = c(-66,66), 
+                       name = "Paleo\nlatitude") 
+sampling_plot
+
+# ggsave("../Figures/sampling_effort_slopes.png", sampling_plot, width = 20, height = 10, scale = 0.32)
+
+summary(lm(slope ~ log(total), data = sampling_slopes_lat %>% filter(data == "ecogroup")))
+summary(lm(slope ~ log(total), data = sampling_slopes_lat %>% filter(data == "morphogroup")))
+summary(lm(slope ~ log(total), data = sampling_slopes_lat %>% filter(data == "species")))
+```
+

@@ -1,0 +1,557 @@
+---
+title: 'Figure: Latitudinal homogeneity gradient'
+output: html_document
+date: "2026-01-20"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, fig.width = 10)
+```
+
+
+```{r}
+library(tidyverse)
+library(FAVA)
+library(patchwork)
+library(broom)
+
+data_pal = PNWColors::pnw_palette("Bay", 3) %>% `names<-`(c("ecogroup", "morphogroup", "species"))
+
+```
+
+```{r}
+triton <- data.table::fread("../Data_raw/Data_Triton_v2_Maike_compressed/Triton_Binned_Trimmed.csv")
+
+ecogroup <- data.table::fread("../Data_raw/Data_Triton_v2_Maike_compressed/Ecogroup.csv")
+```
+
+
+## Summarize the data in bins 5 million years wide and 5 degress latitude wide
+
+In our next set of analyses, we break down the data into both spatial and temporal bins, whose definitions are visualized in the following plots. 
+
+```{r 5 degree/million year bins}
+# Define bins for the age and paleo latitude 
+# age_bins = data.frame(age = 0:65, 
+#                       age_bin = c(rep(seq(0,60,5),each=5), 60, 60))
+# ggplot(age_bins, aes(x=age,y=age_bin)) +
+#   geom_line() + geom_point()
+# 
+# lat_bins = data.frame(pal.lat = -75:88, 
+#                       lat_bin = rep(seq(-76,88,5),each=5)[-165] + 1)
+# ggplot(lat_bins, aes(x=pal.lat,y=lat_bin)) +
+#   geom_line() + geom_point()
+
+# Make a table of species counts for each age_bin/lat_bin combo
+species_abundances_5my_5deg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  transmute(species, 
+            age_bin = cut(age, breaks = c(seq(0,60,5), 66)), 
+            lat_bin = cut(pal.lat, breaks =c(-76, seq(-70,80,5), 88)), 
+            abundance)  %>%
+  # left_join(age_bins) %>%
+  # left_join(lat_bins) %>% 
+  group_by(age_bin, lat_bin, species) %>%
+  summarise(abundance = sum(abundance)) %>%
+  pivot_wider(names_from = species, 
+              values_from = abundance, 
+              values_fill = 0) %>%
+  mutate(
+    age_lower = as.numeric(str_extract(as.character(age_bin), "-?\\d+\\.?\\d*")),
+    age_upper = as.numeric(str_extract(as.character(age_bin), "(?<=,)\\s*-?\\d+\\.?\\d*")), 
+    .after = age_bin
+  ) %>%
+  mutate(
+    lat_lower = as.numeric(str_extract(as.character(lat_bin), "-?\\d+\\.?\\d*")),
+    lat_upper = as.numeric(str_extract(as.character(lat_bin), "(?<=,)\\s*-?\\d+\\.?\\d*")), 
+    .after = lat_bin
+  ) %>% 
+  mutate(age_bin = forcats::fct_rev(age_bin))
+
+# Remove the 15 age/lat combos with counts < 5
+# sum(rowSums(species_abundances_5my_5deg[,-c(1:6)])<5)
+species_abundances_5my_5deg = species_abundances_5my_5deg[rowSums(species_abundances_5my_5deg[,-c(1:6)])>=5,]
+
+# Normalize rows to generate relative abundances
+species_relab_5my_5deg = species_abundances_5my_5deg
+species_relab_5my_5deg[,-c(1:6)] = species_abundances_5my_5deg[,-c(1:6)] /rowSums(species_abundances_5my_5deg[,-c(1:6)])
+```
+
+
+
+```{r}
+# Make a table of ecogroup counts for each age_bin/lat_bin combo
+ecogroup_abundances_5my_5deg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  left_join(ecogroup) %>%
+  transmute(ecogroup = `Ecogroup(s)`, 
+            age_bin = cut(age, breaks = c(seq(0,60,5), 66)), 
+            lat_bin = cut(pal.lat, breaks =c(-76, seq(-70,80,5), 88)), 
+            abundance)  %>%
+  # left_join(age_bins) %>%
+  # left_join(lat_bins) %>% 
+  group_by(age_bin, lat_bin, ecogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(ecogroup !="") %>%
+  pivot_wider(names_from = ecogroup, 
+              values_from = abundance, 
+              values_fill = 0)  %>%
+  mutate(
+    age_lower = as.numeric(str_extract(as.character(age_bin), "-?\\d+\\.?\\d*")),
+    age_upper = as.numeric(str_extract(as.character(age_bin), "(?<=,)\\s*-?\\d+\\.?\\d*")), 
+    .after = age_bin
+  ) %>%
+  mutate(
+    lat_lower = as.numeric(str_extract(as.character(lat_bin), "-?\\d+\\.?\\d*")),
+    lat_upper = as.numeric(str_extract(as.character(lat_bin), "(?<=,)\\s*-?\\d+\\.?\\d*")), 
+    .after = lat_bin
+  ) %>% 
+  mutate(age_bin = forcats::fct_rev(age_bin))
+
+
+# Remove the 15 age/lat combos with counts < 5
+# sum(rowSums(ecogroup_abundances_5my_5deg[,-c(1:6)])<5)
+ecogroup_abundances_5my_5deg = ecogroup_abundances_5my_5deg[rowSums(ecogroup_abundances_5my_5deg[,-c(1:6)])>=5,]
+
+# Normalize rows to generate relative abundances
+ecogroup_relab_5my_5deg = ecogroup_abundances_5my_5deg
+ecogroup_relab_5my_5deg[,-c(1:6)] = ecogroup_abundances_5my_5deg[,-c(1:6)] /rowSums(ecogroup_abundances_5my_5deg[,-c(1:6)])
+```
+
+```{r}
+# Make a table of morphogroup counts for each age_bin/lat_bin combo
+morphogroup_abundances_5my_5deg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  left_join(ecogroup) %>%
+  transmute(morphogroup = Morphogroup, 
+            age_bin = cut(age, breaks = c(seq(0,60,5), 66)), 
+            lat_bin = cut(pal.lat, breaks =c(-76, seq(-70,80,5), 88)), 
+            abundance)  %>%
+  # left_join(age_bins) %>%
+  # left_join(lat_bins) %>% 
+  group_by(age_bin, lat_bin, morphogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(morphogroup !="") %>%
+  pivot_wider(names_from = morphogroup, 
+              values_from = abundance, 
+              values_fill = 0) %>%
+  mutate(
+    age_lower = as.numeric(str_extract(as.character(age_bin), "-?\\d+\\.?\\d*")),
+    age_upper = as.numeric(str_extract(as.character(age_bin), "(?<=,)\\s*-?\\d+\\.?\\d*")), 
+    .after = age_bin
+  ) %>%
+  mutate(
+    lat_lower = as.numeric(str_extract(as.character(lat_bin), "-?\\d+\\.?\\d*")),
+    lat_upper = as.numeric(str_extract(as.character(lat_bin), "(?<=,)\\s*-?\\d+\\.?\\d*")), 
+    .after = lat_bin
+  ) %>% 
+  mutate(age_bin = forcats::fct_rev(age_bin))
+
+
+# Remove the 15 age/lat combos with counts < 5
+# sum(rowSums(morphogroup_abundances_5my_5deg[,-c(1:6)])<5)
+morphogroup_abundances_5my_5deg = morphogroup_abundances_5my_5deg[rowSums(morphogroup_abundances_5my_5deg[,-c(1:6)])>=5,]
+
+# Normalize rows to generate relative abundances
+morphogroup_relab_5my_5deg = morphogroup_abundances_5my_5deg
+morphogroup_relab_5my_5deg[,-c(1:6)] = morphogroup_abundances_5my_5deg[,-c(1:6)] /rowSums(morphogroup_abundances_5my_5deg[,-c(1:6)])
+```
+
+
+
+## Compute FAVA in sliding windows across latitudes for each time window
+
+This analysis computes FAVA in sliding windows five samples wide within each panel of Figure 1a. 
+
+```{r}
+species_lat.windows = FAVA::window_fava(relab_matrix = species_relab_5my_5deg,
+                                        window_size = 5,
+                                        K = 335,
+                                        group = "age_bin",
+                                        time = "lat_lower")
+
+ecogroup_lat.windows = FAVA::window_fava(relab_matrix = ecogroup_relab_5my_5deg,
+                                         window_size = 5,
+                                         K = 18,
+                                         group = "age_bin",
+                                         time = "lat_lower")
+
+morphogroup_lat.windows = FAVA::window_fava(relab_matrix = morphogroup_relab_5my_5deg,
+                                            window_size = 5,
+                                            K = 19,
+                                            group = "age_bin",
+                                            time = "lat_lower")
+
+lat.windows_all = morphogroup_lat.windows$window_data %>%
+  transmute(age_bin = group,window_index, lat_lower = w1, morphogroup = FAVA, w1, w5) %>% 
+  left_join(ecogroup_lat.windows$window_data %>% 
+              transmute( age_bin = group, window_index, lat_lower = w1, ecogroup = FAVA, w1, w5)) %>% 
+  left_join(species_lat.windows$window_data %>% 
+              transmute( age_bin = group,  window_index, lat_lower = w1, species = FAVA, w1, w5)) %>% 
+  # pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" ) %>%
+  pivot_longer(cols = c(morphogroup, ecogroup, species), 
+               names_to = "data", values_to = "FAVA") %>% 
+  left_join(species_relab_5my_5deg %>% select(age_bin, age_lower, age_upper, lat_bin, lat_lower, lat_upper) %>% distinct) %>% 
+  transmute(window_index, w1, w5, lat_bin, lat_lower, lat_upper, 
+            age_bin = factor(age_bin, ordered = TRUE, levels = levels(species_abundances_5my_5deg$age_bin) %>% rev), 
+            age_lower, age_upper, data, FAVA) 
+
+lat.windows_all = lat.windows_all %>%
+  mutate(age_bin_label = paste0("[", - lat.windows_all$age_upper, ", ",
+                                - lat.windows_all$age_lower, ")") %>% 
+           factor(ordered = TRUE, 
+                  levels = unique(paste0("[", - lat.windows_all$age_upper, ", ",
+                                         - lat.windows_all$age_lower, ")"))))
+
+
+discrete_time_pal = viridis::cividis(n = 13, direction = -1) %>% `names<-`(unique(lat.windows_all$age_bin) %>% rev)
+```
+
+```{r}
+ggplot(lat.windows_all %>% 
+         pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" ) , 
+       aes(x = pal.lat, y = FAVA, 
+           color = age_bin, 
+           group = paste0(window_index, age_bin, data, FAVA))) + 
+  geom_line(linewidth = 1, alpha=0.3) + 
+  theme_bw() + scale_color_manual(values = discrete_time_pal, name = "Time (Ma)") + 
+  facet_grid(cut(age_upper, breaks = c(0, 20, 40, 66))~data) +
+  guides(color = guide_legend(reverse = TRUE, override.aes = list(alpha = 1))) + 
+  geom_point(data = lat.windows_all  %>% 
+               pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )%>% 
+               filter(window_bound == "w1"), size = 0.7, alpha = 0.8)+ 
+  geom_line(aes(group = age_bin), data = lat.windows_all %>% 
+              pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" ) %>% 
+              filter(window_bound == "w1"), linewidth = 0.7, alpha = 0.4)
+
+
+lat_spatial_gradient = ggplot(lat.windows_all %>% 
+                                pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )  %>% 
+                                mutate(age_bin = forcats::fct_rev(age_bin)), 
+                              aes(x = pal.lat, y = FAVA, 
+                                  color = data, 
+                                  group = paste0(window_index, age_bin, data, FAVA))) + 
+  geom_vline(xintercept = 0, color ="grey", linewidth = 1.5) +
+  geom_line(linewidth = 1, alpha=0.5) + 
+  theme_bw() + scale_color_manual(values = data_pal, labels = c("Eco.", "Morpho.", "Species")) + 
+  facet_wrap(~ age_bin, ncol = 7) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  theme(legend.position = c(0.935, 0.25), legend.title = element_blank(), legend.background = element_blank()) + 
+  geom_point(data = lat.windows_all%>% 
+               pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )  %>%
+               filter(window_bound == "w1"), size = 0.6, alpha = 0.8)+ 
+  geom_line(aes(group = data), data = lat.windows_all%>% 
+              pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )  %>%
+              filter(window_bound == "w1"), linewidth = 0.5, alpha = 0.8) + 
+  xlab("Paleolatitude")
+
+lat_spatial_gradient
+
+# ggsave("../Figures/lat_space_gradient.png", plot = lat_spatial_gradient, width = 30, height = 15, scale = 0.22)
+
+```
+
+```{r}
+
+lat_cat_pal = RColorBrewer::brewer.pal(n = 11, name = "Spectral")[c(1,6,9)] %>% `names<-`(c("Southern", "Equatorial", "Northern"))
+
+t = 30
+latcat = lat.windows_all %>%
+  mutate(lat_cat = ifelse(w1 < -t, "Southern", 
+                          ifelse(w5>t, "Northern", "Equatorial")) %>%
+           factor(ordered = TRUE, levels = c("Southern", "Equatorial", "Northern")),
+         age_cat = cut(age_upper, c(0, 20, 40, 66)) %>% factor(ordered = TRUE) %>% forcats::fct_rev()) %>% 
+  left_join(data.frame(age_cat = c("(0,20]", "(20,40]", "(40,66]"), 
+                       age_cat_label = c("[-20,0)", "[-40,-20)", "[-66,-40)") %>% factor(ordered = TRUE, levels = c("[-20,0)", "[-40,-20)", "[-66,-40)") %>% rev)))
+
+table(latcat$lat_cat)
+table(latcat$age_cat)
+
+```
+
+
+STATISTICS
+```{r}
+
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(0,20]")$FAVA, g = filter(latcat, age_cat == "(0,20]")$lat_cat)
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(20,40]")$FAVA, g = filter(latcat, age_cat == "(20,40]")$lat_cat)
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(40,66]")$FAVA, g = filter(latcat, age_cat == "(40,66]")$lat_cat)
+
+
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(0,20]", data == "ecogroup")$FAVA, g = filter(latcat, age_cat == "(0,20]", data == "ecogroup")$lat_cat)
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(0,20]", data == "morphogroup")$FAVA, g = filter(latcat, age_cat == "(0,20]", data == "morphogroup")$lat_cat)
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(0,20]", data == "species")$FAVA, g = filter(latcat, age_cat == "(0,20]", data == "species")$lat_cat)
+
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(20,40]", data == "ecogroup")$FAVA, g = filter(latcat, age_cat == "(20,40]", data == "ecogroup")$lat_cat)
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(20,40]", data == "morphogroup")$FAVA, g = filter(latcat, age_cat == "(20,40]", data == "morphogroup")$lat_cat)
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(20,40]", data == "species")$FAVA, g = filter(latcat, age_cat == "(20,40]", data == "species")$lat_cat)
+
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(40,66]", data == "ecogroup")$FAVA, g = filter(latcat, age_cat == "(40,66]", data == "ecogroup")$lat_cat)
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(40,66]", data == "morphogroup")$FAVA, g = filter(latcat, age_cat == "(40,66]", data == "morphogroup")$lat_cat)
+pairwise.wilcox.test(x = filter(latcat, age_cat == "(40,66]", data == "species")$FAVA, g = filter(latcat, age_cat == "(40,66]", data == "species")$lat_cat)
+
+```
+
+
+
+```{r}
+library(patchwork)
+
+# center_windows = table(lat.windows_all$lat_bin)[11:20] %>% names
+# high_windows = table(lat.windows_all$lat_bin)[21:32] %>% names
+# low_windows = table(lat.windows_all$lat_bin)[1:10] %>% names
+
+box = ggplot(latcat, aes(x = lat_cat, y = FAVA, fill = lat_cat)) + geom_boxplot(alpha = 0.7) + 
+  ggpubr::stat_compare_means(comparisons = list(c("Southern", "Equatorial"), 
+                                                c("Equatorial", "Northern"), 
+                                                c("Southern", "Northern")), 
+                             aes(label = ..p.signif..),
+                             label.y = c(0.2, 0.25, 0.3)) +
+  scale_fill_manual(values = lat_cat_pal, guide = "none") + theme_bw() + 
+  facet_wrap(~age_cat_label, ncol = 1) + theme(axis.title.x = element_blank())
+box
+
+box_data = ggplot(latcat, aes(x = lat_cat, y = FAVA, fill = data)) + geom_boxplot(alpha=0.7) + 
+  # ggpubr::stat_compare_means(comparisons = list(c("Southern", "Equatorial"), 
+  #                                               c("Equatorial", "Northern"), 
+  #                                               c("Southern", "Northern"))) +
+  scale_fill_manual(values = data_pal, name = "Data") + theme_bw() + 
+  facet_wrap(~age_cat_label, ncol = 1) + 
+  theme(axis.title.x = element_blank(), 
+        # axis.text.x = element_text(color = lat_cat_pal),
+        legend.position = c(0.55, 0.52))#, legend.title = element_blank())
+
+design <- matrix(c(1, 2, 3, 4, 5,
+                   6, 7, 8, 9, NA,
+                   10, 11, 12, 13, NA), byrow=T, ncol = 5)
+pans = ggplot(latcat %>% 
+                pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )  %>% 
+                mutate(age_bin = forcats::fct_rev(age_bin)), 
+              aes(x = pal.lat, y = FAVA, 
+                  color = lat_cat, 
+                  group = paste0(window_index, age_bin, data, FAVA))) + 
+  geom_vline(xintercept = 0, color ="grey", linewidth = 1.5) + 
+  geom_vline(xintercept = c(-t, t), color ="grey", linewidth = 0.5) +
+  geom_line(linewidth = 1, alpha=0.9) + 
+  # theme_bw() + 
+  scale_color_manual(values = lat_cat_pal, name = "Paleolatitude") +
+  ggh4x::facet_manual(facets = vars(age_bin_label), design = design) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  theme(legend.position = c(0.935, 0.2),
+        panel.grid.minor.x  = element_blank(),
+        panel.grid.major.x  = element_blank(),       
+        panel.grid.minor.y  = element_blank(),
+        # legend.title = element_blank(), 
+        legend.background = element_blank()) + 
+  geom_point(data = latcat%>% 
+               pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )  %>%
+               filter(window_bound == "w1") %>% 
+               mutate(age_bin = forcats::fct_rev(age_bin)), size = 0.6, alpha = 0.9)+ 
+  geom_line(aes(group = data), data = latcat%>% 
+              pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )  %>%
+              filter(window_bound == "w1") %>% 
+              mutate(age_bin = forcats::fct_rev(age_bin)), linewidth = 0.5, alpha = 0.9) + 
+  xlab("Paleolatitude") 
+pans
+
+panels_plot = patchwork::wrap_plots(pans, box, box_data, widths = c(4,2,2), guides = "collect") + plot_annotation(tag_levels = "A")& theme(legend.position = 'bottom') & ylab("Spatial FAVA")
+
+# ggsave("../Figures/lat_space_gradient_supp.png", panels_plot, width = 30, height = 20, scale = 0.3)
+```
+
+```{r}
+p = ggplot(latcat, aes(x = -age_upper, y = FAVA, color = data)) +
+  geom_point(alpha = 0.6) + 
+  geom_line(alpha = 0.4, aes(group = paste0(data, lat_bin))) + 
+  facet_grid(~lat_cat, scales = "free_x") + theme_bw() +
+  scale_color_manual(values = data_pal, name = "Data") + 
+  ggpubr::stat_cor(label.x.npc = 0.1, label.y = c(0.25, 0.3, 0.35) + 0.02) + xlab("Window start (Ma)")  + 
+  theme(legend.position = "bottom") +
+  ylab("Spatial FAVA")
+p
+
+cor.test(-filter(latcat, lat_cat == "Northern")$age_upper, 
+         filter(latcat, lat_cat == "Northern")$FAVA)
+cor.test(-filter(latcat, lat_cat == "Equatorial")$age_upper, 
+         filter(latcat, lat_cat == "Equatorial")$FAVA)
+cor.test(-filter(latcat, lat_cat == "Southern")$age_upper, 
+         filter(latcat, lat_cat == "Southern")$FAVA)
+cor.test(-latcat$age_upper, latcat$FAVA)
+
+# ggsave("../Figures/lat_space_gradient_time.png", p, width = 20, height = 10, scale = 0.3)
+
+summary(lm(FAVA ~ age_upper, data = filter(latcat, data == "ecogroup", lat_cat == "Equatorial")))
+summary(lm(FAVA ~ age_upper, data = filter(latcat, data == "morphogroup", lat_cat == "Equatorial")))
+summary(lm(FAVA ~ age_upper, data = filter(latcat, data == "species", lat_cat == "Equatorial")))
+
+summary(lm(FAVA ~ age_upper, data = filter(latcat, data == "ecogroup", lat_cat == "Southern")))
+summary(lm(FAVA ~ age_upper, data = filter(latcat, data == "morphogroup", lat_cat == "Southern")))
+summary(lm(FAVA ~ age_upper, data = filter(latcat, data == "species", lat_cat == "Southern")))
+
+summary(lm(FAVA ~ age_upper, data = filter(latcat, data == "ecogroup", lat_cat == "Northern")))
+summary(lm(FAVA ~ age_upper, data = filter(latcat, data == "morphogroup", lat_cat == "Northern")))
+summary(lm(FAVA ~ age_upper, data = filter(latcat, data == "species", lat_cat == "Northern")))
+
+```
+
+
+Main text panels option
+
+```{r}
+lat_spatial_gradient_2 = ggplot(lat.windows_all %>% 
+                                  pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )  %>% 
+                                  mutate(age_bin = forcats::fct_rev(age_bin)), 
+                                aes(x = pal.lat, y = FAVA, 
+                                    color = data, 
+                                    group = paste0(window_index, age_bin, data, FAVA))) + 
+  geom_vline(xintercept = 0, color ="grey", linewidth = 1.5) +
+  geom_vline(xintercept = c(-30, 30), color ="grey", linewidth = 0.5) +
+  geom_line(linewidth = 1, alpha=0.5) + 
+  theme_bw() + scale_color_manual(values = data_pal, name = "Data") + 
+  ggh4x::facet_manual(~ age_bin_label, design = design) +
+  guides(color = guide_legend(override.aes = list(alpha = 1))) +
+  theme(legend.position = c(0.92, 0.18), #legend.title = element_blank(),
+        legend.background = element_blank(), panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank()) + 
+  geom_point(data = lat.windows_all%>% 
+               mutate(age_bin = forcats::fct_rev(age_bin))%>% 
+               pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )  %>%
+               filter(window_bound == "w1"), size = 0.6, alpha = 0.8)+ 
+  geom_line(aes(group = data), data = lat.windows_all%>% 
+              mutate(age_bin = forcats::fct_rev(age_bin))%>% 
+              pivot_longer(cols = c(w1, w5), values_to = "pal.lat", names_to = "window_bound" )  %>%
+              filter(window_bound == "w1"), linewidth = 0.5, alpha = 0.8) + 
+  xlab("Paleolatitude")
+
+box_data_2 = ggplot(latcat, aes(x = lat_cat, y = FAVA, fill = data, color = data)) + geom_boxplot(alpha=0.3, outlier.alpha = 1) + 
+  # ggpubr::stat_compare_means(comparisons = list(c("Southern", "Equatorial"), 
+  #                                               c("Equatorial", "Northern"), 
+  #                                               c("Southern", "Northern"))) +
+  scale_fill_manual(values = data_pal, name = "Data") + 
+  scale_color_manual(values = data_pal, name = "Data") + 
+  theme_bw() + 
+  facet_wrap(~age_cat_label, ncol = 1) + 
+  theme(axis.title.x = element_blank(), 
+        axis.text.x = element_text(angle = -0,vjust = 0),
+        legend.position = c(0.55, 0.52))  +
+  ggpubr::stat_compare_means(comparisons = list(c("Southern", "Equatorial"),
+                                                c("Equatorial", "Northern"), 
+                                                c("Southern", "Northern")), 
+                             aes(label = ..p.signif..),
+                             label.y = c(0.2, 0.25, 0.32)) 
+
+panels2 = wrap_plots(lat_spatial_gradient_2, box_data_2+ theme(legend.position = "none"), widths = c(3,1)) + plot_annotation(tag_levels = "A") & ylab("Spatial FAVA")
+
+# ggsave("../Figures/lat_space_gradient_2_neg.png", panels2, width = 28, height = 16, scale = 0.3)
+
+```
+
+
+# Explore high ecogroup FAVA in 55-50 Ma
+
+Two claims to consider: 
+
+1. Southern ecogroup FAVA values are higher than southern morphogroup or species values 55-50 Ma. 
+
+2. Southern ecogroup FAVA values decreased more moderately than did FAVA values for other data sets or regions between [60,55) Ma and [55,50) Ma.
+
+
+(1) There is nothing significant for all the southern windows. This is because many of the "southern" ecogroup windows are also very low. These comparisons include the 6 most southern windows for each data type, but the large difference is only present for the southernmost 4 windows. 
+
+```{r}
+# ANALYSIS FOR ALL "SOUTHERN" WINDOWS
+latcat_55.50_southern = latcat %>% filter(age_bin_label == "[-55, -50)", lat_cat == "Southern") 
+pairwise.wilcox.test(x = latcat_55.50_southern$FAVA, g = latcat_55.50_southern$data)
+
+# ANALYSIS FOR SOUTHERNMOST FOUR WINDOWS
+latcat_55.50_first4 = latcat %>% filter(age_bin_label == "[-55, -50)", window_index %in% 1:4) 
+pairwise.wilcox.test(x = latcat_55.50_first4$FAVA, g = latcat_55.50_southern$data)
+pairwise.wilcox.test(x = latcat_55.50_first4$FAVA, g = latcat_55.50_southern$data, alternative = "less")
+```
+
+(2) 
+```{r}
+latcat_60.50_southern_difference = latcat %>% filter(age_bin_label %in% c("[-60, -55)", "[-55, -50)"), lat_cat == "Southern") %>% 
+  select(age_bin_label, lat_lower, FAVA, window_index, data) %>% 
+  pivot_wider(names_from = age_bin_label, values_from = FAVA) %>% 
+  mutate(difference = `[-55, -50)` - `[-60, -55)`) 
+
+pairwise.wilcox.test(x = latcat_60.50_southern_difference$difference, g = latcat_60.50_southern_difference$data)
+
+ggplot(latcat_60.50_southern_difference, aes(x = lat_lower, y = difference, color = data)) + 
+  geom_point() + geom_line() +
+  scale_color_manual(values = data_pal) +
+  geom_hline(yintercept = 0) + 
+  theme_bw() + ylab("Difference in FAVA values\n( [-55, -50) - [-60, -55) ) ") + 
+  xlab("Paleolatitude (southernmost bound of sliding window)")
+
+
+latcat_60.50_first4_difference = latcat %>% filter(age_bin_label %in% c("[-60, -55)", "[-55, -50)"), window_index %in% 1:4) %>% 
+  select(age_bin_label, FAVA, window_index, data, lat_lower) %>% 
+  pivot_wider(names_from = age_bin_label, values_from = FAVA) %>% 
+  mutate(difference = `[-55, -50)` - `[-60, -55)`) 
+
+
+pairwise.wilcox.test(x = latcat_60.50_first4_difference$difference, g = latcat_60.50_first4_difference$data)
+pairwise.wilcox.test(x = latcat_60.50_first4_difference$difference, g = latcat_60.50_first4_difference$data, alternative = "less")
+```
+
+# SEESAW DYNAMICS
+
+The seesaw dynamics of high latitude peaks from 30-0 Ma - e.g., high peak is South first, high peak in north at 15-10 Ma and then high peak at south from 5-0 Ma. 
+
+* 30-25 - Antarctic ice sheet establishes novel Southern Ocean ecosystem causing instability
+
+* 15-10 - Cooling following the Miocene Climatic Optimum, biological pump strengthens in mid-latitudes, causes instability in the Northern Hemisphere
+
+* 10-5 - Restabilisation, further cooling in both poles
+
+* 5-0 - Plio-Pleistocene bipolar cryosphere established, further ice sheet expansion and instability in South polar region and north temperature region (likely AMOC intensification - see Larina et al. 2025)
+
+
+```{r}
+latcat_30.0_s.v.n = latcat %>% filter(age_upper <= 30) %>% 
+  select(window_index, age_bin_label, data, FAVA, lat_cat)
+
+boxes_many =  ggplot(latcat_30.0_s.v.n, aes(x = lat_cat, y = FAVA)) +
+  geom_boxplot(alpha = 0.5, aes(fill = data)) + 
+  geom_point(alpha = 0.5)+
+  theme_bw() +
+  scale_fill_manual(values = data_pal, guide = "none") + 
+  facet_grid(data~age_bin_label) +
+  theme(axis.title.x = element_blank()) + 
+  ggpubr::stat_compare_means(comparisons = list(c("Southern", "Equatorial"), 
+                                                c("Equatorial", "Northern"), 
+                                                c("Southern", "Northern")), 
+                             aes(label = ..p.signif..),
+                             label.y = c(0.15, 0.175, 0.2)) + 
+  ylab("Spatial FAVA")
+boxes_many
+
+# ggsave("../Figures/lat_space_gradient_seesaw.png", boxes_many, width = 30, height = 15, scale = 0.4)
+
+# comps = lapply(list(c("Southern", "Equatorial"), 
+#                     c("Equatorial", "Northern"), 
+#                     c("Southern", "Northern")), 
+#                function(entry){
+#                  list(sapply(entry, function(x) paste0(x, ".ecogroup")),
+#                       sapply(entry, function(x) paste0(x, ".morphogroup")),
+#                       sapply(entry, function(x) paste0(x, ".species")))
+#                }) %>% purrr::list_flatten()
+# 
+# ggplot(latcat_30.0_s.v.n, aes(x = interaction(lat_cat, data), y = FAVA, fill = data)) +
+#   geom_boxplot(alpha = 0.5) + 
+#   geom_point(alpha = 0.5)+
+#   theme_bw() +
+#   scale_fill_manual(values = data_pal, guide = "none") + 
+#   facet_grid(age_bin_label~.) +
+#   theme(axis.title.x = element_blank(),
+#         axis.text.x = element_text(angle = -45, hjust = 0)) + 
+#   ggpubr::stat_compare_means(comparisons = comps, 
+#                              aes(label = ..p.signif..),
+#                              label.y = c(0.15, 0.2, 0.25))
+
+
+```
+
+

@@ -1,0 +1,751 @@
+---
+title: "FAVA, Temperature, and d18O"
+output: html_document
+date: "2025-12-17"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, fig.width = 10)
+```
+
+```{r}
+library(tidyverse)
+library(FAVA)
+library(patchwork)
+library(broom)
+```
+
+```{r}
+triton <- data.table::fread("../Data_raw/Data_Triton_v2_Maike_compressed/Triton_Binned_Trimmed.csv")
+
+ecogroup <- data.table::fread("../Data_raw/Data_Triton_v2_Maike_compressed/Ecogroup.csv")
+
+data_pal = PNWColors::pnw_palette("Bay", 3) %>% `names<-`(c("ecogroup", "morphogroup", "species"))
+
+```
+
+
+# Analyze the data in bins 5 million years wide and 5 degress latitude wide
+
+We break down the data into both spatial and temporal bins, whose definitions are visualized in the following plots. 
+
+```{r 5 degree/million year bins}
+# Define bins for the age and paleo latitude 
+age_bins = data.frame(age = 0:66, 
+                      age_bin = rep(seq(0,66,5),each=5)[1:67])
+ggplot(age_bins, aes(x=age,y=age_bin)) +
+  geom_line(aes(x=0:66, y=0:66), color="red")+
+  geom_line() + geom_point() 
+
+lat_bins = data.frame(pal.lat = -75:88, 
+                      lat_bin = rep(seq(-76,88,5),each=5)[-165] + 1) %>% 
+  mutate(lat_bin_label = paste0("[",lat_bin, ", ", lat_bin+4, "]"))
+ggplot(data=lat_bins, aes(x=pal.lat,y=lat_bin)) +
+  geom_line() + geom_point()+
+  geom_line(data = data.frame(pal.lat=-76:88, lat_bin=-76:88), color="red", alpha=0.5)
+
+
+# ------------------------------------------------------------------------------
+# Make a table of species counts for each age_bin/lat_bin combo
+species_abundances_5my_5deg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  transmute(species, 
+            age = round(age), 
+            pal.lat = round(pal.lat), 
+            abundance)  %>%
+  left_join(age_bins) %>%
+  left_join(lat_bins) %>% 
+  group_by(age_bin, lat_bin, lat_bin_label, species) %>%
+  summarise(abundance = sum(abundance)) %>%
+  pivot_wider(names_from = species, 
+              values_from = abundance, 
+              values_fill = 0)
+
+# Remove the 15 age/lat combos with counts < 5
+# sum(rowSums(species_abundances_5my_5deg[,-c(1:3)])<5)
+species_abundances_5my_5deg = species_abundances_5my_5deg[rowSums(species_abundances_5my_5deg[,-c(1:3)])>=5,]
+
+# Normalize rows to generate relative abundances
+species_relab_5my_5deg = species_abundances_5my_5deg
+species_relab_5my_5deg[,-c(1:3)] = species_abundances_5my_5deg[,-c(1:3)] /rowSums(species_abundances_5my_5deg[,-c(1:3)])
+
+
+# ------------------------------------------------------------------------------
+# Make a table of ecogroup counts for each age_bin/lat_bin combo
+ecogroup_abundances_5my_5deg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  left_join(ecogroup) %>%
+  transmute(ecogroup = `Ecogroup(s)`, 
+            age = round(age), 
+            pal.lat = round(pal.lat), 
+            abundance)  %>%
+  left_join(age_bins) %>%
+  left_join(lat_bins) %>% 
+  group_by(age_bin, lat_bin, lat_bin_label, ecogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(ecogroup !="") %>%
+  pivot_wider(names_from = ecogroup, 
+              values_from = abundance, 
+              values_fill = 0)
+
+# Remove the 15 age/lat combos with counts < 5
+# sum(rowSums(ecogroup_abundances_5my_5deg[,-c(1:3)])<5)
+ecogroup_abundances_5my_5deg = ecogroup_abundances_5my_5deg[rowSums(ecogroup_abundances_5my_5deg[,-c(1:3)])>=5,]
+
+# Normalize rows to generate relative abundances
+ecogroup_relab_5my_5deg = ecogroup_abundances_5my_5deg
+ecogroup_relab_5my_5deg[,-c(1:3)] = ecogroup_abundances_5my_5deg[,-c(1:3)] /rowSums(ecogroup_abundances_5my_5deg[,-c(1:3)])
+
+# ------------------------------------------------------------------------------
+# Make a table of morphogroup counts for each age_bin/lat_bin combo
+morphogroup_abundances_5my_5deg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  left_join(ecogroup) %>%
+  transmute(morphogroup = Morphogroup, 
+            age = round(age), 
+            pal.lat = round(pal.lat), 
+            abundance)  %>%
+  left_join(age_bins) %>%
+  left_join(lat_bins) %>% 
+  group_by(age_bin, lat_bin, lat_bin_label, morphogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(morphogroup !="") %>%
+  pivot_wider(names_from = morphogroup, 
+              values_from = abundance, 
+              values_fill = 0)
+
+# Remove the 15 age/lat combos with counts < 5
+# sum(rowSums(morphogroup_abundances_5my_5deg[,-c(1:3)])<5)
+morphogroup_abundances_5my_5deg = morphogroup_abundances_5my_5deg[rowSums(morphogroup_abundances_5my_5deg[,-c(1:3)])>=5,]
+
+# Normalize rows to generate relative abundances
+morphogroup_relab_5my_5deg = morphogroup_abundances_5my_5deg
+morphogroup_relab_5my_5deg[,-c(1:3)] = morphogroup_abundances_5my_5deg[,-c(1:3)] /rowSums(morphogroup_abundances_5my_5deg[,-c(1:3)])
+
+# ------------------------------------------------------------------------------
+# FILTER DATA SETS SO THAT EACH LAT BIN CONTAINS AT LEAST 10 YEAR BINS 
+species_relab_5my_5deg_filtered = species_relab_5my_5deg %>%
+  filter(lat_bin %in% 
+           sort(unique(species_relab_5my_5deg$lat_bin))[
+             table(species_relab_5my_5deg$lat_bin) >= 10]) 
+ecogroup_relab_5my_5deg_filtered = ecogroup_relab_5my_5deg %>%
+  filter(lat_bin %in% 
+           sort(unique(species_relab_5my_5deg$lat_bin))[
+             table(species_relab_5my_5deg$lat_bin) >= 10]) 
+morphogroup_relab_5my_5deg_filtered = morphogroup_relab_5my_5deg %>%
+  filter(lat_bin %in% 
+           sort(unique(species_relab_5my_5deg$lat_bin))[
+             table(species_relab_5my_5deg$lat_bin) >= 10]) 
+```
+
+```{r}
+# Make a dataset that puts them all together
+comp_time_lat = rbind(species_relab_5my_5deg_filtered %>% 
+                        pivot_longer(cols = -c(age_bin, lat_bin, lat_bin_label), names_to = "category", values_to = "abundance") %>% 
+                        mutate(data_type = "Species"), 
+                      
+                      ecogroup_relab_5my_5deg_filtered %>% 
+                        pivot_longer(cols = -c(age_bin, lat_bin, lat_bin_label), names_to = "category", values_to = "abundance") %>% 
+                        mutate(data_type = "Ecogroup"),
+                      
+                      morphogroup_relab_5my_5deg_filtered %>% 
+                        pivot_longer(cols = -c(age_bin, lat_bin, lat_bin_label), names_to = "category", values_to = "abundance") %>% 
+                        mutate(data_type = "Morphogroup") ) %>% 
+  filter(abundance > 0) %>% ungroup
+
+comp_time_lat$category = paste0(comp_time_lat$data_type, comp_time_lat$category)
+comp_time_lat$category = factor(comp_time_lat$category, ordered=TRUE)#,
+# levels = pal_all %>% names)
+comp_time_lat$lat_bin_label = factor(comp_time_lat$lat_bin_label, ordered=TRUE, 
+                                     levels = lat_bins$lat_bin_label %>% unique)
+
+# comp_time_lat$category =  factor(comp_time_lat$category, ordered = TRUE, 
+#                                   c(paste0("Species", colnames(species_relab_5my_5deg_filtered)[-c(1,2)]),
+#                                     paste0("Ecogroup", colnames(ecogroup_relab_5my_5deg_filtered)[-c(1,2)]),
+#                                     paste0("Morphogroup", colnames(morphogroup_relab_5my_5deg_filtered)[-c(1,2)] %>% rev)) %>%
+#                                     rev)
+```
+
+
+## Compute FAVA in sliding windows across time windows for each latitude bin
+
+This analysis computes FAVA in sliding window four samples wide.
+
+```{r}
+species_age.windows = 
+  FAVA::window_fava(relab_matrix = species_relab_5my_5deg_filtered,
+                    window_size = 4,
+                    K = 335,
+                    group = "lat_bin_label",
+                    time = "age_bin")
+
+ecogroup_age.windows = 
+  FAVA::window_fava(relab_matrix = ecogroup_relab_5my_5deg_filtered,
+                    window_size = 4,
+                    K = 18,
+                    group = "lat_bin_label",
+                    time = "age_bin")
+
+morphogroup_age.windows = 
+  FAVA::window_fava(relab_matrix = morphogroup_relab_5my_5deg_filtered,
+                    window_size = 4,
+                    K = 19,
+                    group = "lat_bin_label",
+                    time = "age_bin")
+
+
+age.windows_all = morphogroup_age.windows$window_data %>%
+  transmute(group, window_index, w1, w2, w3, w4, morphogroup = FAVA) %>% 
+  left_join(ecogroup_age.windows$window_data %>% 
+              transmute(group, window_index, w1, w2, w3, w4, ecogroup = FAVA)) %>% 
+  left_join(species_age.windows$window_data %>% 
+              transmute(group, window_index, w1, w2, w3, w4, species = FAVA)) %>%
+  pivot_longer(cols = c(morphogroup, ecogroup, species), 
+               names_to = "data", values_to = "FAVA")  %>% 
+  pivot_longer(cols = c(w1, w2, w3, w4), names_to = "position", values_to = "mya")
+
+age.windows_all$group = factor(age.windows_all$group, ordered=TRUE, levels = unique(lat_bins$lat_bin_label))
+
+
+lat.stab.grad.panels = ggplot(age.windows_all %>% 
+                                mutate(data = stringr::str_to_title(data)))+ 
+  geom_smooth(method = "lm", aes(x = mya, y = FAVA), linewidth = 0.3, color = "black")  + 
+  geom_line(aes(x = mya, y = FAVA, 
+                color = data, 
+                group = paste0(window_index, group, data, FAVA)),
+            linewidth = 1, alpha=0.6) + theme_bw() + 
+  ggh4x::facet_grid2(data~group, 
+                     strip = ggh4x::strip_themed(text_y=lapply(data_pal, function(col) element_text(color = col, face = "bold"))))+ 
+  theme(legend.position = "none", strip.background = element_blank()) + 
+  scale_x_reverse(breaks = c(60, 30, 0))+ 
+  scale_color_manual(values = data_pal %>% `names<-`(c("Ecogroup", "Morphogroup", "Species")), guide="none") + 
+  xlab("Million years ago") + 
+  ylab("Temporal FAVA")
+lat.stab.grad.panels
+
+# ggsave("../Figures/lat_stab_grad_slopes_5my.png", lat.stab.grad.panels, width = 41, height = 12, scale = 0.3)
+
+
+# Slopes for species
+species_nested_age.windows <- species_age.windows$window_data %>% 
+  pivot_longer(cols = w1:w4, names_to = "index", values_to = "mya") %>% 
+  transmute(pal.lat = group, FAVA, mya) %>%
+  nest(data = -pal.lat) %>%
+  mutate(pal.lat = pal.lat %>% stringr::str_split_i(pattern = c("[\\[,\\]]+"), 2) %>% as.numeric)
+
+species_slopes_by_lat <- species_nested_age.windows %>%
+  mutate(model = map(data, ~lm(FAVA ~ mya, data = .)))  %>%
+  mutate(results = map(model, tidy)) %>%
+  unnest(results)  %>% filter(term == "mya") %>% 
+  transmute(pal.lat, slope=-estimate, p.value, data = "species")
+# ^ I use the negative of the slope here because time is going backwards
+
+
+# Slopes for ecogroups
+ecogroup_nested_age.windows <- ecogroup_age.windows$window_data %>% 
+  pivot_longer(cols = w1:w4, names_to = "index", values_to = "mya") %>% 
+  transmute(pal.lat = group, FAVA, mya) %>%
+  nest(data = -pal.lat) %>%
+  mutate(pal.lat = pal.lat %>% stringr::str_split_i(pattern = c("[\\[,\\]]+"), 2) %>% as.numeric)
+
+ecogroup_slopes_by_lat <- ecogroup_nested_age.windows %>%
+  mutate(model = map(data, ~lm(FAVA ~ mya, data = .)))  %>%
+  mutate(results = map(model, tidy)) %>%
+  unnest(results)  %>% filter(term == "mya") %>% 
+  transmute(pal.lat, slope=-estimate, p.value, data = "ecogroup")
+# ^ I use the negative of the slope here because time is going backwards
+
+
+# Slopes for morphogroups
+morphogroup_nested_age.windows <- morphogroup_age.windows$window_data %>% 
+  pivot_longer(cols = w1:w4, names_to = "index", values_to = "mya") %>% 
+  transmute(pal.lat = group, FAVA, mya) %>%
+  nest(data = -pal.lat) %>%
+  mutate(pal.lat = pal.lat %>% stringr::str_split_i(pattern = c("[\\[,\\]]+"), 2) %>% as.numeric)
+
+morphogroup_slopes_by_lat <- morphogroup_nested_age.windows %>%
+  mutate(model = map(data, ~lm(FAVA ~ mya, data = .)))  %>%
+  mutate(results = map(model, tidy)) %>%
+  unnest(results)  %>% filter(term == "mya") %>% 
+  transmute(pal.lat, slope=-estimate, p.value, data = "morphogroup")
+# ^ I use the negative of the slope here because time is going backwards
+
+all_slopes_by_lat = rbind(ecogroup_slopes_by_lat, 
+                          morphogroup_slopes_by_lat, 
+                          species_slopes_by_lat)
+
+
+# Fit quadratic and abs models to each data set 
+quadratic_model_species <- lm(slope ~ pal.lat + I(pal.lat^2), data = species_slopes_by_lat)
+quadratic_model_ecogroup <- lm(slope ~ pal.lat + I(pal.lat^2), data = ecogroup_slopes_by_lat)
+quadratic_model_morphogroup <- lm(slope ~ pal.lat + I(pal.lat^2), data = morphogroup_slopes_by_lat)
+
+summary(quadratic_model_species)
+summary(quadratic_model_ecogroup)
+summary(quadratic_model_morphogroup)
+```
+
+
+
+
+# Load data from Gaskell et al. 
+
+```{r}
+do = readxl::read_xlsx("../Data_raw/Gaskell_2022_PNAS/pnas.2111332119.sd03.xlsx") %>% 
+  data.frame 
+
+temp = readxl::read_xlsx("../Data_raw/Gaskell_2022_PNAS/pnas.2111332119.sd01.xlsx") %>% 
+  data.frame 
+
+temp %>% 
+  select(pallat, age, sst) %>% 
+  filter(age <= 65)%>%
+  mutate(pallat_approx = round(pallat), 
+         age = round(age)) %>% 
+  left_join(age_bins) %>% pull(age_bin) %>% table
+
+temp_mean = temp %>% 
+  select(pallat, age, sst) %>%
+  filter(age <= 65)%>%
+  mutate(pallat_approx = round(pallat), 
+         age = round(age)) %>% 
+  left_join(age_bins) %>% 
+  mutate(age = age_bin) %>%
+  group_by(pallat_approx, age) %>% 
+  summarize(sst = mean(sst)) %>% 
+  arrange(pallat_approx, age)
+
+# ggplot(temp_mean, aes(x = pallat_approx, y = sst, color = age_bin)) + geom_point() + scale_color_viridis_c()
+
+
+do = do %>% filter(age < 70)
+
+do_approx = do %>%
+  mutate(pallat_approx = round(pallat)) %>% 
+  group_by(pallat_approx, age) %>% 
+  summarize(d18O_sw = mean(d18O_sw)) %>% 
+  arrange(pallat_approx, age)
+
+temp_all = do_approx %>% left_join(temp_mean)
+
+# ggplot(temp_all, aes(x = d18O_sw, y = sst, color = age)) + geom_point() + scale_color_viridis_c()
+
+table(do$age)
+table(do$pallat_approx)
+
+str(do)
+str(comp_time_lat)
+```
+
+Let's look at relationship between FAVA and temperature at each time and latitude bin (not yet looking at slope of FAVA)
+
+```{r}
+fava_do = age.windows_all %>% mutate(
+  lat_1 = stringr::str_split_i(age.windows_all$group, "\\s*[\\[\\],]\\s*", 2) %>%
+    as.numeric,
+  lat_2 = lat_1 + 1, 
+  lat_3 = lat_1 + 2,
+  lat_4 = lat_1 + 3, 
+  lat_5 = stringr::str_split_i(age.windows_all$group, "\\s*[\\[\\],]\\s*", 3) %>%
+    as.numeric,
+  lat_start = lat_1,
+  lat_center = lat_3) %>%
+  pivot_longer(cols = paste0("lat_", 1:5),
+               names_to = "lat_index", values_to = "pallat") %>%
+  left_join(do_approx %>% transmute(pallat = pallat_approx, mya = age, d18O_sw))  %>% 
+  # filter(!is.na(d18O_sw)) %>%
+  group_by(data, group, window_index, lat_start, lat_center, FAVA) %>% 
+  summarize(start_mya = max(mya), mean_d18O_sw = mean(d18O_sw, na.rm = TRUE))  %>% 
+  mutate(start_mya_bin = 
+           cut(-start_mya,
+               breaks = c(-65, -45, -30, -15),
+               include.lowest = TRUE,
+               right = FALSE,
+               labels = c(
+                 "65 to 50 mya",
+                 "45 to 35 mya",
+                 "30 to 15 mya")))
+
+```
+
+```{r}
+
+p01 = ggplot(fava_do, 
+       aes(y = FAVA, x = lat_start, color = start_mya %>% as.factor)) +
+  geom_point() + 
+  facet_grid(data ~ start_mya_bin)+
+  geom_line(alpha=0.5) + 
+  scale_color_viridis_d(option = "E", direction = -1, name = "Window\nstart\n(mya)")  + 
+  theme_bw()+
+  xlab("Southernmost bound of 5-degree paleo latitude bin")
+
+p02 = ggplot(fava_do %>% filter(!is.na(mean_d18O_sw)), 
+       aes(y = mean_d18O_sw, x = lat_start, color = start_mya %>% as.factor)) +
+  geom_point() + 
+  facet_grid( ~ start_mya_bin)+
+  geom_line(alpha=0.5) + 
+  scale_color_viridis_d(option = "E", direction = -1, name = "Window\nstart\n(mya)")  + 
+  theme_bw() + 
+  ylab("Mean d18O") +
+  xlab("Southernmost bound of 5-degree paleo latitude bin")
+
+p03 = ggplot(fava_do %>% filter(!is.na(mean_d18O_sw)) %>% arrange(lat_start), 
+       aes(x = mean_d18O_sw, y = FAVA, fill = lat_start)) +
+  geom_path(aes(group = start_mya %>% factor, color = start_mya %>% factor), alpha = 0.5) +
+  geom_point(shape = 21, size = 2, alpha = 0.8) + 
+  facet_grid(data ~ start_mya_bin)+
+  theme_bw() + 
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(11, "Spectral"), 
+                       limits = c(-66,66), 
+                       name = "Paleo\nlatitude") +
+  xlab("Mean d18O (in a 5-degree paleo latitude bin & a 5-My window)") + 
+  scale_color_viridis_d(option = "E", direction = -1, name = "Window\nstart\n(mya)", guide = "none")
+
+panels_fava = wrap_plots(p01, p02, p03, guides = "collect", ncol = 1, heights = c(3,1,3)) + plot_annotation(tag_levels = "A")
+
+# ggsave("../Figures/lat_fava_grad_temperature.png", panels_fava, width = 25, height = 25, scale = 0.37)
+
+
+```
+
+
+Let's compare the slope of FAVA in a lat. window with the mean temp over the past 66 million years in that window:
+
+```{r}
+slope_do = all_slopes_by_lat %>% mutate(
+  lat_1 = pal.lat,
+  lat_2 = lat_1 + 1, 
+  lat_3 = lat_1 + 2,
+  lat_4 = lat_1 + 3, 
+  lat_5 = pal.lat+4,
+  lat_center = lat_3, 
+  lat_start = lat_1) %>%
+  pivot_longer(cols = paste0("lat_", 1:5), names_to = "lat_index", values_to = "pallat") %>%
+  left_join(do_approx %>% group_by(pallat_approx) %>% summarize(mean_d18O_sw = mean(d18O_sw, na.rm = TRUE)) %>%
+              transmute(pallat = pallat_approx, mean_d18O_sw))  %>% 
+  # filter(!is.na(d18O_sw)) %>%
+  group_by(data, lat_center, lat_start, slope) %>% 
+  summarize(mean_d18O_sw = mean(mean_d18O_sw, na.rm = TRUE)) %>%
+  ungroup %>% data.frame
+```
+
+```{r}
+# Latitudinal d18O_sw gradient
+
+p1 = ggplot(fava_do, aes(x = lat_start, y = mean_d18O_sw, fill = start_mya)) + 
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_point(size = 3, shape =21, color = "black", alpha = 0.3) + theme_bw() +
+  scale_fill_viridis_c(option = "E", direction = -1, name = "Time\n(mya)") + 
+  ylab("d18O\n(mean in a 5-degree pal. lat. bin)") +
+  xlab("Southernmost bound of\n5-degree pal. lat. bin")
+
+p2 = ggplot(slope_do, aes(x = lat_start, y = mean_d18O_sw, fill = lat_start))  +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) + 
+  geom_point(shape = 21, color = "black", size = 3, alpha = 0.8) + 
+  theme_bw() +
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(11, "Spectral"), 
+                       limits = c(-66,66), 
+                       name = "Paleo\nlatitude") + 
+  ylab("d18O\n(mean over all times\nin a 5-degree pal. lat. bin)") +
+  xlab("Southernmost bound of\n5-degree pal. lat. bin")
+
+p3 = ggplot(slope_do, aes(x = lat_start, y = slope, shape = data, fill = lat_start))  +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) + 
+  geom_point(color = "black", size = 3, alpha = 0.8) + 
+  theme_bw() + 
+  scale_shape_manual(values = c(21, 22, 24), guide = "none") +
+  xlab("Southernmost bound of\n5-degree pal. lat. bin")+ 
+  ylab("Slope:\n[change in tFAVA] /\n[change in time (mya)]")+
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(11, "Spectral"), 
+                       limits = c(-66,66), 
+                       name = "Paleo\nlatitude") + 
+  ylim(-0.005, 0.005)
+
+
+p4 = ggplot(slope_do,
+            aes(y = slope, x = mean_d18O_sw, 
+                fill = lat_start, shape = data))  +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) + 
+  stat_smooth(method = "lm", aes(group = data, color = data), alpha = 0.1) +
+  scale_color_manual(values = data_pal)+ 
+  geom_point(color = "black", size = 3, alpha = 0.8) + 
+  scale_shape_manual(values = c(21, 22, 24))+ 
+  theme_bw() +
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(11, "Spectral"), 
+                       limits = c(-66,66), 
+                       name = "Paleo\nlatitude")+
+  xlab("d18O\n(mean over all times in a 5-degree pal. lat. bin)") + 
+  ylab("Slope:\n[change in tFAVA] /\n[change in time (mya)]") + 
+  ggpubr::stat_cor(aes(group = data, color = data), 
+                   label.x.npc = 0.3, label.y.npc = 1)+ 
+  ylim(-0.005, 0.005)
+p4
+
+
+
+panels = patchwork::wrap_plots(p1, p2, p3, p4, guides = "collect") + 
+  plot_annotation(tag_levels = "A")
+
+# ggsave("../Figures/lat_stab_grad_temperature.png", panels, width = 25, height = 15, scale = 0.37)
+```
+
+Statistics comparing slope and d18O
+
+```{r}
+summary(lm(formula = slope ~ mean_d18O_sw, data = slope_do)) 
+
+cor.test(slope_do %>% filter(data == "ecogroup") %>% pull(slope),
+         slope_do %>% filter(data == "ecogroup") %>% pull(mean_d18O_sw))
+
+cor.test(slope_do %>% filter(data == "morphogroup") %>% pull(slope),
+         slope_do %>% filter(data == "morphogroup") %>% pull(mean_d18O_sw))
+
+
+cor.test(slope_do %>% filter(data == "species") %>% pull(slope),
+         slope_do %>% filter(data == "species") %>% pull(mean_d18O_sw))
+
+
+summary(lm(formula = slope ~ mean_d18O_sw, 
+           data = slope_do %>% filter(data == "ecogroup"))) 
+summary(lm(formula = slope ~ mean_d18O_sw, 
+           data = slope_do %>% filter(data == "morphogroup"))) 
+summary(lm(formula = slope ~ mean_d18O_sw, 
+           data = slope_do %>% filter(data == "species"))) 
+
+```
+
+
+
+
+## SAME but for sst (sea surface temp) in place of d18O 
+
+
+```{r}
+fava_do_sst = age.windows_all %>% mutate(
+  lat_1 = stringr::str_split_i(age.windows_all$group, "\\s*[\\[\\],]\\s*", 2) %>%
+    as.numeric,
+  lat_2 = lat_1 + 1, 
+  lat_3 = lat_1 + 2,
+  lat_4 = lat_1 + 3, 
+  lat_5 = stringr::str_split_i(age.windows_all$group, "\\s*[\\[\\],]\\s*", 3) %>%
+    as.numeric,
+  lat_start = lat_1,
+  lat_center = lat_3) %>%
+  pivot_longer(cols = paste0("lat_", 1:5),
+               names_to = "lat_index", values_to = "pallat") %>%
+  left_join(temp_mean %>% transmute(pallat = pallat_approx, mya = age, sst))  %>% 
+  # filter(!is.na(d18O_sw)) %>%
+  group_by(data, group, window_index, lat_start, lat_center, FAVA) %>% 
+  summarize(start_mya = max(mya), mean_sst = mean(sst, na.rm = TRUE))  %>% 
+  mutate(start_mya_bin = 
+           cut(-start_mya,
+               breaks = c(-65, -45, -30, -15),
+               include.lowest = TRUE,
+               right = FALSE,
+               labels = c(
+                 "65 to 50 mya",
+                 "45 to 35 mya",
+                 "30 to 15 mya")))
+
+```
+
+```{r}
+slope_do_sst = all_slopes_by_lat %>% mutate(
+  lat_1 = pal.lat,
+  lat_2 = lat_1 + 1, 
+  lat_3 = lat_1 + 2,
+  lat_4 = lat_1 + 3, 
+  lat_5 = pal.lat+4,
+  lat_center = lat_3, 
+  lat_start = lat_1) %>%
+  pivot_longer(cols = paste0("lat_", 1:5), names_to = "lat_index", values_to = "pallat") %>%
+  left_join(temp_mean %>% group_by(pallat_approx) %>% summarize(mean_sst = mean(sst, na.rm = TRUE)) %>%
+              transmute(pallat = pallat_approx, mean_sst))  %>% 
+  # filter(!is.na(sst)) %>%
+  group_by(data, lat_center, lat_start, slope) %>% 
+  summarize(mean_sst = mean(mean_sst, na.rm = TRUE)) %>%
+  ungroup %>% data.frame
+```
+
+```{r}
+# Latitudinal sst gradient
+
+p1_sst = ggplot(fava_do_sst, aes(x = lat_start, y = mean_sst, fill = start_mya)) + 
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  geom_point(size = 3, shape =21, color = "black", alpha = 0.3) + theme_bw() +
+  scale_fill_viridis_c(option = "E", direction = -1, name = "Time\n(mya)") + 
+  ylab("Sea-surface temperature\n(mean in a 5-degree pal. lat. bin)") +
+  xlab("Southernmost bound of\n5-degree pal. lat. bin")
+
+p2_sst = ggplot(slope_do_sst, aes(x = lat_start, y = mean_sst, fill = lat_start))  +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) + 
+  geom_point(shape = 21, color = "black", size = 3, alpha = 0.8) + 
+  theme_bw() +
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(11, "Spectral"), 
+                       limits = c(-66,66), 
+                       name = "Paleo\nlatitude") + 
+  ylab("Sea-surface temperature\n(mean over all times\nin a 5-degree pal. lat. bin)") +
+  xlab("Southernmost bound of\n5-degree pal. lat. bin")
+
+p3_sst = ggplot(slope_do_sst, aes(x = lat_start, y = slope, shape = data, fill = lat_start))  +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) + 
+  geom_point(color = "black", size = 3, alpha = 0.8) + 
+  theme_bw() + 
+  scale_shape_manual(values = c(21, 22, 24), guide = "none") +
+  xlab("Southernmost bound of\n5-degree pal. lat. bin")+ 
+  ylab("Slope:\n[change in tFAVA] /\n[change in time (mya)]")+
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(11, "Spectral"), 
+                       limits = c(-66,66), 
+                       name = "Paleo\nlatitude") + 
+  ylim(-0.005, 0.005)
+
+
+p4_sst = ggplot(slope_do_sst,
+            aes(y = slope, x = mean_sst, 
+                fill = lat_start, shape = data))  +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) +
+  stat_smooth(method = "lm", aes(group = data, color = data), alpha = 0.1) +
+  scale_color_manual(values = data_pal)+ 
+  geom_point(color = "black", size = 3, alpha = 0.8) + 
+  scale_shape_manual(values = c(21, 22, 24))+ 
+  theme_bw() +
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(11, "Spectral"), 
+                       limits = c(-66,66), 
+                       name = "Paleo\nlatitude")+
+  xlab("Sea-surface temperature\n(mean over all times in a 5-degree pal. lat. bin)") + 
+  ylab("Slope:\n[change in tFAVA] /\n[change in time (mya)]") + 
+  ggpubr::stat_cor(aes(group = data, color = data), 
+                   label.x.npc = 0.4, label.y.npc = 1)+ 
+  ylim(-0.005, 0.005)
+
+
+
+panels_sst = patchwork::wrap_plots(p1_sst, p2_sst, p3_sst, p4_sst, guides = "collect") + 
+  plot_annotation(tag_levels = "A")
+panels_sst
+
+# ggsave("../Figures/lat_stab_grad_sst.png", panels_sst, width = 25, height = 15, scale = 0.37)
+```
+
+Statistics comparing slope and sst
+
+```{r}
+summary(lm(formula = slope ~ mean_sst, data = slope_do_sst)) 
+
+cor.test(slope_do_sst %>% filter(data == "ecogroup") %>% pull(slope),
+         slope_do_sst %>% filter(data == "ecogroup") %>% pull(mean_sst))
+
+cor.test(slope_do_sst %>% filter(data == "morphogroup") %>% pull(slope),
+         slope_do_sst %>% filter(data == "morphogroup") %>% pull(mean_sst))
+
+
+cor.test(slope_do_sst %>% filter(data == "species") %>% pull(slope),
+         slope_do_sst %>% filter(data == "species") %>% pull(mean_sst))
+
+
+summary(lm(formula = slope ~ mean_sst, 
+           data = slope_do_sst %>% filter(data == "ecogroup"))) 
+summary(lm(formula = slope ~ mean_sst, 
+           data = slope_do_sst %>% filter(data == "morphogroup"))) 
+summary(lm(formula = slope ~ mean_sst, 
+           data = slope_do_sst %>% filter(data == "species"))) 
+
+```
+
+
+
+# Is there a relationship between the amount of change in temperature over time at each paleolatitude and FAVA?
+
+```{r}
+vard18o_slopes = do_approx %>% left_join(lat_bins, by = c("pallat_approx" = "pal.lat")) %>% 
+  group_by(lat_bin) %>% 
+  summarize(range = range(d18O_sw) %>% diff, 
+            sd = sd(d18O_sw), 
+            var = var(d18O_sw)) %>% 
+  left_join(all_slopes_by_lat, by = c("lat_bin" = "pal.lat"))
+
+summary(lm(slope ~ var, data = vard18o_slopes %>% filter(data == "ecogroup")))
+summary(lm(slope ~ var, data = vard18o_slopes %>% filter(data == "morphogroup")))
+summary(lm(slope ~ var, data = vard18o_slopes %>% filter(data == "species")))
+
+summary(lm(slope ~ range, data = vard18o_slopes %>% filter(data == "ecogroup")))
+summary(lm(slope ~ range, data = vard18o_slopes %>% filter(data == "morphogroup")))
+summary(lm(slope ~ range, data = vard18o_slopes %>% filter(data == "species")))
+
+
+vartemp_slopes = temp %>% transmute(pallat = round(pallat), age, sst) %>% 
+  distinct %>% 
+  left_join(lat_bins, by = c("pallat" = "pal.lat"))  %>% 
+  group_by(lat_bin) %>% 
+  summarize(range = range(sst) %>% diff, 
+            sd = sd(sst), 
+            var = var(sst)) %>% 
+  left_join(all_slopes_by_lat, by = c("lat_bin" = "pal.lat"))
+
+
+summary(lm(slope ~ var, data = vartemp_slopes %>% filter(data == "ecogroup")))
+summary(lm(slope ~ var, data = vartemp_slopes %>% filter(data == "morphogroup")))
+summary(lm(slope ~ var, data = vartemp_slopes %>% filter(data == "species")))
+
+summary(lm(slope ~ range, data = vartemp_slopes %>% filter(data == "ecogroup")))
+summary(lm(slope ~ range, data = vartemp_slopes %>% filter(data == "morphogroup")))
+summary(lm(slope ~ range, data = vartemp_slopes %>% filter(data == "species")))
+
+```
+
+
+# VERSION OF THE STABILITY GRADIENT FIGURE WITH TEMPERATURE 
+```{r}
+slopes_plot = ggplot(all_slopes_by_lat %>% mutate(data = stringr::str_to_title(data)), aes(x = pal.lat, y = slope, color = data)) +
+  geom_hline(yintercept = 0) +
+  geom_vline(xintercept = 0) + 
+  stat_smooth(method = "glm", formula = y ~ x + I(x^2), alpha=0.3)+ 
+  geom_point(size=3, alpha=0.75) +
+  # geom_point(size=2, aes(color = data)) + 
+  xlab("Paleo latitude") + 
+  ylab("Slope:\n[change in tFAVA] / [change in time (mya)]") +
+  theme_bw()+ 
+  scale_x_continuous(breaks = seq(-60,60,10)) + 
+  scale_color_manual(values = data_pal %>% `names<-`(stringr::str_to_title(names(data_pal)))) + 
+  theme(legend.title = element_blank(), legend.position = c(0.35, 0.85))+
+  ylim(-0.005, 0.005)
+
+slopes_plot
+# ggsave("../Figures/lat_stab_grad.png", slopes_plot, width=20, height=12, scale=0.3)
+
+
+p4_sst_2 = ggplot(slope_do_sst,
+            aes(y = slope, x = mean_sst, color = data,
+                fill = lat_start, shape = data))  +
+  geom_hline(yintercept = 0) +
+  # geom_vline(xintercept = 0) +
+  stat_smooth(method = "lm", aes(group = data, color = data), alpha = 0.1, show.legend = FALSE) +
+  scale_color_manual(values = data_pal, name = "")+ 
+  geom_point(size = 3, alpha = 0.8, stroke = 1) + 
+  scale_shape_manual(values = c(21, 22, 24), name = "")+ 
+  theme_bw() +
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(11, "Spectral"), 
+                       limits = c(-66,66), 
+                       name = "Paleo\nlatitude")+
+  xlab("Sea-surface temperature\n(mean over all times in a 5-degree pal. lat. bin)") + 
+  ylab("Slope:\n[change in tFAVA] /[change in time (mya)]") + 
+  ggpubr::stat_cor(aes(group = data, color = data), 
+                   label.x.npc = 0, label.y.npc = 1, show.legend = FALSE)+
+  ylim(-0.005, 0.005)
+p4_sst_2
+
+slopes_panels = wrap_plots(slopes_plot, p4_sst_2, widths = c(2,1)) + plot_annotation(tag_levels = "A")
+slopes_panels
+
+# ggsave("../Figures/lat_stab_grad_w_temp_tfava.png", slopes_panels, width = 30, height = 15, scale = 0.28)
+```
+
