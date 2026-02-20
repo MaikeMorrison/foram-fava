@@ -20,7 +20,7 @@ Morrison, M. L., Woodhouse, A., & Swain, A. (2026). Latitudinal dependence of st
 
 ### `figures_stability_heterogeneity.Rmd` 
 
-**Figure 2 and related supplemental figures.**
+**Figure 2 and supplemental figures and statistical analyses related to Figure 2 panels C-D.**
 
 - Figure 2
 
@@ -28,18 +28,28 @@ Morrison, M. L., Woodhouse, A., & Swain, A. (2026). Latitudinal dependence of st
 
 - Figure S9
 
+- Figure S10
+
 
 ### `figure_temp_lat_stab_grad.Rmd`  
 
 **Supplemental figures and statistical analyses related to Figure 2 panels A-B.** 
 
-- Figure S3
+- Figures S3
+
+- Figure S4
+
+- Figure S5
 
 - Figure S6
 
 - Figure S7
 
+### `sampling_threshold.Rmd`  
 
+**Reproduces Figure 2 with a more conservative sampling threshold.** 
+
+- Figure S11
 
 
 
