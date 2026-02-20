@@ -1,0 +1,650 @@
+---
+title: 'Figure 1: Compare FAVA values over time for species, ecogroups, and morphogroups'
+output: html_document
+date: "2025-11-04"
+---
+
+# Overview
+
+This code generates the FAVA-relevant content in Figure 1: a plot comparing FAVA values over time for species, ecogroups, and morphogroups, along with shading to indicate periods where species FAVA is much lower than the other types. It also includes statistical comparisons of FAVA values during specific time periods, and relative abundance plots of species, ecogroups, and morphogroups over time. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, fig.width = 10)
+```
+
+# Load libraries
+
+```{r}
+library(tidyverse)
+library(FAVA)
+library(patchwork)
+library(broom)
+library(data.table)
+```
+
+# Read and analyze data
+
+```{r}
+triton <- data.table::fread("../Data_raw/Data_Triton_v2_Maike_compressed/Triton_Binned_Trimmed.csv")
+
+ecogroup <- data.table::fread("../Data_raw/Data_Triton_v2_Maike_compressed/Ecogroup.csv")
+
+data_pal = PNWColors::pnw_palette("Bay", 3) %>% `names<-`(c("ecogroup", "morphogroup", "species"))
+
+```
+
+# Generate relative abundance data for species, ecogroups, and morphogroups at 0.5 million year intervals
+
+```{r, fig.width=10, fig.height=8}
+species_abundances_0.5my_alldeg = triton %>% 
+  filter(`Macro.micro` == "Macroperforate") %>%
+  transmute(species,
+            age = round(age*2)/2, 
+            abundance)  %>%
+  group_by(age, species) %>%
+  summarise(abundance = sum(abundance)) %>%
+  pivot_wider(names_from = species, 
+              values_from = abundance, 
+              values_fill = 0)
+
+ecogroup_abundances_0.5my_alldeg = triton %>% 
+  left_join(ecogroup) %>%
+  filter(`Macro.micro` == "Macroperforate") %>%
+  transmute(ecogroup = `Ecogroup(s)`,
+            age = round(age*2)/2, 
+            abundance)  %>%
+  group_by(age, ecogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(ecogroup !="") %>%
+  pivot_wider(names_from = ecogroup, 
+              values_from = abundance, 
+              values_fill = 0)
+
+morphogroup_abundances_0.5my_alldeg = triton %>% 
+  left_join(ecogroup) %>%
+  filter(`Macro.micro` == "Macroperforate") %>%
+  transmute(morphogroup = factor(Morphogroup, levels = as.character(1:19), ordered=TRUE),
+            age = round(age*2)/2, 
+            abundance)  %>%
+  group_by(age, morphogroup) %>%
+  summarise(abundance = sum(abundance)) %>%
+  filter(morphogroup !="") %>%
+  pivot_wider(names_from = morphogroup, 
+              values_from = abundance, 
+              values_fill = 0)
+
+# Normalize rows to generate relative abundances
+species_relab_0.5my_alldeg = species_abundances_0.5my_alldeg
+species_relab_0.5my_alldeg[,-1] = species_abundances_0.5my_alldeg[,-1] /rowSums(species_abundances_0.5my_alldeg[,-1])
+
+ecogroup_relab_0.5my_alldeg = ecogroup_abundances_0.5my_alldeg
+ecogroup_relab_0.5my_alldeg[,-1] = ecogroup_abundances_0.5my_alldeg[,-1] /rowSums(ecogroup_abundances_0.5my_alldeg[,-1])
+
+morphogroup_relab_0.5my_alldeg = morphogroup_abundances_0.5my_alldeg
+morphogroup_relab_0.5my_alldeg[,-1] = morphogroup_abundances_0.5my_alldeg[,-1] /rowSums(morphogroup_abundances_0.5my_alldeg[,-1])
+```
+
+# Plot relative abundances over time for species, ecogroups, and morphogroups
+
+```{r}
+# Plot species relative abundances over time
+p_species = plot_relabund(relab_matrix = species_relab_0.5my_alldeg %>% mutate(age=-age)%>%arrange(age), time = "age")
+
+# Plot ecogroup relative abundances over time
+p_ecogroup = plot_relabund(relab_matrix = ecogroup_relab_0.5my_alldeg %>% mutate(age=-age)%>%arrange(age), time = "age")
+
+
+# Plot morphogroup relative abundances over time
+p_morphogroup = plot_relabund(relab_matrix = morphogroup_relab_0.5my_alldeg %>% mutate(age=-age)%>%arrange(age), time = "age")
+
+
+labels = unique( p_species@data$time ) %>% str_replace("-", "")
+labels[-seq(2,131,4)] = ""
+
+comp_time_auto = (p_species + scale_x_discrete(labels = labels) + theme_minimal()+
+                    theme(legend.position = "none", axis.title.x = element_blank()) +
+                    xlab("Million years ago") + ggtitle("Species")) / 
+  (p_ecogroup + scale_x_discrete(labels = labels) + theme_minimal()+
+     theme(legend.position = "none", axis.title.x = element_blank()) + xlab("Million years ago") +
+     ggtitle("Ecogroups"))/
+  (p_morphogroup + scale_x_discrete(labels = labels) + theme_minimal()+
+     theme(legend.position = "none") + xlab("Million years ago") +
+     ggtitle("Morphogroups"))
+comp_time_auto
+
+
+comp_time_data = rbind(species_relab_0.5my_alldeg %>% arrange(age) %>% 
+                         pivot_longer(cols = -1, names_to = "category", values_to = "abundance") %>% 
+                         mutate(data_type = "Species"), 
+                       
+                       ecogroup_relab_0.5my_alldeg %>% arrange(age) %>% 
+                         pivot_longer(cols = -1, names_to = "category", values_to = "abundance") %>% 
+                         mutate(data_type = "Ecogroup"),
+                       
+                       morphogroup_relab_0.5my_alldeg %>% arrange(age) %>% 
+                         pivot_longer(cols = -1, names_to = "category", values_to = "abundance") %>% 
+                         mutate(data_type = "Morphogroup") ) %>% 
+  filter(abundance > 0) %>% ungroup
+
+comp_time_data$category = paste0(comp_time_data$data_type, comp_time_data$category)
+
+comp_time_data$category =  factor(comp_time_data$category, ordered = TRUE, 
+                                  c(paste0("Species", colnames(species_relab_0.5my_alldeg)[-1]),
+                                    paste0("Ecogroup", colnames(ecogroup_relab_0.5my_alldeg)[-1]),
+                                    paste0("Morphogroup", colnames(morphogroup_relab_0.5my_alldeg)[-1] %>% rev)) %>%
+                                    rev)
+
+pal_all = c(viridisLite::viridis(n=ncol(species_relab_0.5my_alldeg) -1) %>%
+              `names<-`(filter(comp_time_data, data_type == "Species") %>% 
+                          pull(category) %>% 
+                          sort %>%
+                          unique),
+            viridisLite::viridis(n=ncol(ecogroup_relab_0.5my_alldeg) -1) %>%
+              `names<-`(filter(comp_time_data, data_type == "Ecogroup")  %>% 
+                          pull(category) %>% 
+                          sort %>%
+                          unique),
+            viridisLite::viridis(n=ncol(morphogroup_relab_0.5my_alldeg) -1) %>%
+              `names<-`(filter(comp_time_data, data_type == "Morphogroup") %>% 
+                          pull(category) %>% 
+                          sort %>%
+                          unique))
+
+# Define custom theme elements for each facet
+strip_themes <- list(
+  Ecogroup = element_text(color = data_pal[[1]]),
+  Morphogroup = element_text(color = data_pal[[2]]),
+  Species = element_text(color = data_pal[[3]])
+)
+
+comp_time = ggplot(comp_time_data,
+                   aes(x = age, y = abundance, fill = category, color = category)) + 
+  geom_bar(stat = "identity") + 
+  theme_bw() + 
+  ggh4x::facet_grid2(data_type~., 
+                     strip = ggh4x::strip_themed(text_y=lapply(data_pal, function(col) element_text(color = col, face = "bold")))) + 
+  theme(legend.position = "none", strip.background = element_blank()) + 
+  scale_fill_manual(values = pal_all)+ 
+  scale_color_manual(values = pal_all) + ylab("Relative abundance") + xlab("Million years ago") + 
+  scale_x_continuous(limits = c(66.5,-0.5), breaks = (6:0)*10, trans = "reverse") + 
+  scale_y_continuous(breaks = c(0,.5,1))
+comp_time
+
+```
+
+
+# Perform sliding window analysis to calculate FAVA values for species, ecogroups, and morphogroups over time
+
+```{r, fig.width=10}
+# Sliding window analysis - species
+
+age.windows_all.lat_10wide_species = 
+  FAVA::window_fava(relab_matrix = species_relab_0.5my_alldeg,
+                    window_size = 10,
+                    K = 335,
+                    time = "age")
+
+
+# Sliding window analysis - ecogroup
+
+age.windows_all.lat_10wide_ecogroup = 
+  FAVA::window_fava(relab_matrix = ecogroup_relab_0.5my_alldeg,
+                    window_size = 10,
+                    K = 18,
+                    time = "age")
+
+
+# Sliding window analysis - morphogroup
+
+age.windows_all.lat_10wide_morphogroup = 
+  FAVA::window_fava(relab_matrix = morphogroup_relab_0.5my_alldeg,
+                    window_size = 10,
+                    K = 19,
+                    time = "age")
+
+
+
+age.windows_all.lat_all_data = age.windows_all.lat_10wide_species$window_data %>% 
+  transmute(window_index, w1, last=w10, species = FAVA) %>% 
+  left_join(age.windows_all.lat_10wide_ecogroup$window_data %>% 
+              transmute(window_index, w1, last=w10, ecogroup = FAVA))%>% 
+  left_join(age.windows_all.lat_10wide_morphogroup$window_data %>% 
+              transmute(window_index, w1, last=w10, morphogroup = FAVA)) %>%
+  mutate(n_windows = 10) %>% 
+  pivot_longer(cols = c(species, ecogroup, morphogroup), 
+               names_to="data", values_to="FAVA")
+```
+
+
+# Plot sliding-window FAVA values over time for species, ecogroups, and morphogroups
+
+```{r}
+fava_time = ggplot(age.windows_all.lat_all_data, 
+                   aes(x=last, y=FAVA,color=data)) + geom_point(alpha=0.5) + 
+  geom_line() + theme_bw() + xlab("Window start (mya)") + 
+  scale_x_continuous(limits = c(66.5,-0.5), breaks = (6:0)*10, trans = "reverse")+ 
+  theme(legend.position = c(0.4,0.7), legend.title = element_blank())+ 
+  scale_color_manual(values = data_pal)
+
+fava_time
+```
+
+
+# Add shading for time periods when species FAVA is much lower than for the other types
+```{r}
+age.windows.diff = age.windows_all.lat_all_data %>% 
+  pivot_wider(names_from = data, values_from = FAVA) %>%
+  transmute(w1, last, eco_diff = ecogroup - species, 
+            morpho_diff = morphogroup - species, 
+            eco_morpho = morphogroup - ecogroup)
+
+pal_epochs = c( "#2C6EF2", "#f7f7f7",  "#F24D2C") # "#f4a582",
+epoch_breaks = c(-0.13, -0.015, 0.015, 0.13)
+
+bar_width = 0.02
+
+fava_time_epochs = ggplot() + 
+  geom_bar(data = age.windows.diff %>% 
+             mutate(eco_morpho = cut(eco_morpho, 
+                                     breaks = epoch_breaks)),
+           aes(x = last, y=-3*bar_width,  fill = eco_morpho, color = eco_morpho), 
+           stat = "identity") + 
+  geom_bar(data = age.windows.diff %>% 
+             mutate(morpho_diff = cut(morpho_diff, 
+                                      breaks = epoch_breaks)),
+           aes(x = last, y=-2*bar_width,  fill = morpho_diff, color = morpho_diff), 
+           stat = "identity")+ 
+  geom_bar(data = age.windows.diff %>% 
+             mutate(eco_diff = cut(eco_diff, 
+                                   breaks = epoch_breaks, ordered_result=TRUE)),
+           aes(x = last, y=-bar_width, fill = eco_diff, color = eco_diff), 
+           stat = "identity") +
+  geom_segment(aes(x = 66.5, xend=1, y = -0.002), color = "white", linewidth=1.5) +
+  geom_segment(aes(x = 66.5, xend=1, y = -2*bar_width), color = "white", linewidth=1.5)+
+  geom_segment(aes(x = 66.5, xend=1, y = -3*bar_width), color = "white", linewidth=2) +
+  geom_segment(aes(x = 66.5, xend=1, y = -bar_width), color = "white", linewidth=1.5) + 
+  geom_hline(yintercept = 0, color = "gray", linewidth = 0.5)+ 
+  scale_color_manual(values = pal_epochs, guide = "none" ) + 
+  scale_fill_manual(values = pal_epochs, guide = "none" ) +
+  geom_label(aes(x = 0, 
+                 label = c("E-S", "M-S", "M-E"), 
+                 y = c(-bar_width/2, -bar_width*3/2, -bar_width*5/2)), size = 3) +
+  
+  ggnewscale::new_scale_color() + 
+  geom_point(data = age.windows_all.lat_all_data, 
+             aes(x=last, y=FAVA,color=data),
+             alpha=0.5) + 
+  geom_line(data = age.windows_all.lat_all_data, 
+            aes(x=last, y=FAVA,color=data)) +
+  theme_bw() + xlab("Window start (mya)") + 
+  scale_x_continuous(limits = c(66.5,-0.5), breaks = (6:0)*10, trans = "reverse")+ 
+  theme(legend.position = c(0.6,0.8), legend.title = element_blank(), legend.direction = "vertical")+ 
+  scale_color_manual(values = data_pal, 
+                     labels = c("Ecogroup", "Morphogroup", "Species")) + 
+  ylab("FAVA")
+fava_time_epochs
+
+epoch_panels_wide = wrap_plots(comp_time, fava_time_epochs + ylab("Temporal FAVA"), ncol=2) + plot_annotation(tag_levels = "A")
+
+epoch_panels_wide
+
+# ggsave(filename = "../Figures/eco_morpho_species_time_windows_compare_wide_3comps.png", plot = epoch_panels_wide, width = 48, height = 22, scale = 0.16)
+```
+
+# Do statistics to compare FAVA values between data types during the time periods when they differ the most (the red and blue bars in the plot above). 
+
+I use Wilcoxon tests to compare FAVA values between groups during these time periods.
+
+```{r}
+ecotype_results <- age.windows.diff %>%
+  transmute(
+    w1, last,
+    ecogroup = cut(eco_diff, breaks = epoch_breaks)
+  ) %>%
+  mutate(ecogroup_run = rleid(ecogroup)) %>%
+  filter(ecogroup != "(-0.015,0.015]") %>%
+  inner_join(
+    age.windows_all.lat_all_data %>%
+      filter(data != "morphogroup") %>%
+      select(w1, last, data, FAVA),
+    by = c("w1", "last")
+  ) %>%
+  group_by(ecogroup_run) %>%
+  reframe(last,
+          p = wilcox.test(FAVA ~ data)$p.value,
+          mean_species  = mean(FAVA[data == "species"]),
+          mean_ecogroup = mean(FAVA[data == "ecogroup"])
+  ) %>% distinct
+
+morphogroup_results <- age.windows.diff %>%
+  transmute(
+    w1, last,
+    morphogroup = cut(morpho_diff, breaks = epoch_breaks)
+  ) %>%
+  mutate(morphogroup_run = rleid(morphogroup)) %>%
+  filter(morphogroup != "(-0.015,0.015]") %>%
+  inner_join(
+    age.windows_all.lat_all_data %>%
+      filter(data != "ecogroup") %>%
+      select(w1, last, data, FAVA),
+    by = c("w1", "last")
+  ) %>%
+  group_by(morphogroup_run) %>%
+  reframe(last,
+          p = wilcox.test(FAVA ~ data)$p.value,
+          mean_species  = mean(FAVA[data == "species"]),
+          mean_morphogroup = mean(FAVA[data == "morphogroup"])
+  ) %>% distinct %>% mutate(p = format(p, scientific=FALSE))
+
+eco_morpho_results <- age.windows.diff %>%
+  transmute(
+    w1, last,
+    eco_morpho = cut(eco_morpho, breaks = epoch_breaks)
+  ) %>%
+  mutate(eco_morpho_run = rleid(eco_morpho)) %>%
+  filter(eco_morpho != "(-0.015,0.015]") %>%
+  inner_join(
+    age.windows_all.lat_all_data %>%
+      filter(data != "species") %>%
+      select(w1, last, data, FAVA),
+    by = c("w1", "last")
+  ) %>%
+  group_by(eco_morpho_run) %>%
+  reframe(last,
+          p = wilcox.test(FAVA ~ data)$p.value,
+          mean_ecogroup  = mean(FAVA[data == "ecogroup"]),
+          mean_morphogroup = mean(FAVA[data == "morphogroup"])
+  ) %>% distinct %>% mutate(p = format(p, scientific=FALSE))
+
+# ecotype_results
+# morphogroup_results
+# eco_morpho_results
+```
+
+# Compare FAVA values during dramatic peaks to other values: 
+
+```{r}
+age.windows_all.lat_all_data.peaks = 
+  age.windows_all.lat_all_data %>% 
+  mutate(period = cut(last, breaks = c(0, 6, 55.4, Inf)))
+
+pairwise.wilcox.test(g = filter(age.windows_all.lat_all_data.peaks, data == "ecogroup")$period, 
+                     x=filter(age.windows_all.lat_all_data.peaks, data == "ecogroup")$FAVA)
+
+pairwise.wilcox.test(g = filter(age.windows_all.lat_all_data.peaks, data == "morphogroup")$period, 
+                     x=filter(age.windows_all.lat_all_data.peaks, data == "morphogroup")$FAVA)
+
+
+pairwise.wilcox.test(g = filter(age.windows_all.lat_all_data.peaks, data == "species")$period, 
+                     x=filter(age.windows_all.lat_all_data.peaks, data == "species")$FAVA)
+
+
+
+# COMPARE MORPHOGROUP TO ECOGROUP FAVA DURING 56-54 MYA
+fava56.54 = age.windows_all.lat_all_data %>% 
+  filter(last <= 56 & last>=54,
+         data != "species") %>% 
+  pivot_wider(names_from = data, values_from = FAVA)
+
+wilcox.test(fava56.54$ecogroup, fava56.54$morphogroup, "less")
+
+# COMPARE MORPHOGROUP TO ECOGROUP FAVA DURING 38-33 MYA
+fava38.33 = age.windows_all.lat_all_data %>% 
+  filter(last <= 38 & last>=33,
+         data != "species") %>% 
+  pivot_wider(names_from = data, values_from = FAVA)
+
+wilcox.test(fava38.33$ecogroup, fava38.33$morphogroup, "less")
+
+```
+
+# Figure S1: Compare diversification of species within ecogroups during 59.5 - 58 mya
+
+```{r}
+species_in_ecogroups = species_relab_0.5my_alldeg %>% 
+  # filter(age <=59.5 & age>=58) %>% 
+  pivot_longer(-1, names_to = "species", values_to = "abundance") %>% 
+  filter(abundance>0) %>% 
+  left_join(select(ecogroup, species, ecogroup = `Ecogroup(s)`) %>%
+              rbind(data.frame(species ="Globigerinoides rublobatus", ecogroup=1))) %>% 
+  na.omit() %>% 
+  # remove 3 Globigerinita iota rows with no known ecogroup.
+  # All but 1 Globigerinoides sp. were in ecogroup 1 so I just added that manually.
+  group_by(age, ecogroup) %>% 
+  summarize(species_in_ecogroup = n()) %>% 
+  group_by(age) %>% summarize(mean_sp_in_eco = mean(species_in_ecogroup)) 
+
+species_in_morphogroups = species_relab_0.5my_alldeg %>% 
+  # filter(age <=59.5 & age>=58) %>% 
+  pivot_longer(-1, names_to = "species", values_to = "abundance") %>% 
+  filter(abundance>0) %>% 
+  left_join(select(ecogroup, species, morphogroup = Morphogroup) %>%
+              rbind(data.frame(species =c("Globigerinoides rublobatus", 
+                                          "Globigerinita iota"),
+                               morphogroup=c(3,7)))) %>% 
+  # 3/4 Globigerinita sp. are in morphogroup 7, so I added manually
+  # 16/18 Globigerinoides sp. were in morphogroup 3 so I added manually
+  group_by(age, morphogroup) %>% 
+  summarize(species_in_morphogroup = n()) %>% 
+  group_by(age) %>% summarize(mean_sp_in_morpho = mean(species_in_morphogroup)) 
+
+species_in_ecogroups_plot = ggplot(species_in_ecogroups, aes(x = age, y = mean_sp_in_eco)) + geom_point() + geom_line() + theme_bw() + 
+  ylab("Mean number of species\nin each ecogroup") + 
+  scale_x_reverse()
+
+species_in_either_group = left_join(species_in_ecogroups, species_in_morphogroups) %>% 
+  `colnames<-`(c("age", "Ecogroup", "Morphogroup")) %>% 
+  pivot_longer(cols = -age, names_to = "data2", values_to = "mean_sp_num")
+
+
+
+# STATISTICS
+sp.eco.59.5 = species_in_ecogroups %>%
+  mutate(group = ifelse(age>59.5, "KPG", ifelse(age>=58, "reorg", NA))) %>%
+  na.omit() 
+
+ggplot(sp.eco.59.5) + geom_boxplot(aes(x = group, y = mean_sp_in_eco))
+
+wilcox.test(filter(sp.eco.59.5, group == "reorg") %>% pull(mean_sp_in_eco),
+            filter(sp.eco.59.5, group == "KPG") %>% pull(mean_sp_in_eco), 
+            alternative = "greater")
+
+
+
+```
+
+```{r}
+scale_factor = 50
+seq(0,0.25,0.05)*scale_factor+2
+
+# rbind(age.windows_all.lat_all_data %>% mutate(data2="Ecogroup"),
+             # age.windows_all.lat_all_data %>% mutate(data2="Morphogroup"))
+
+species_in_either_group_plot = ggplot() + 
+  
+  geom_bar(data = age.windows.diff %>% 
+             mutate(eco_morpho = cut(eco_morpho, 
+                                     breaks = epoch_breaks)),
+           aes(x = last, y=-3*bar_width,  fill = eco_morpho, color = eco_morpho), 
+           stat = "identity") + 
+  geom_bar(data = age.windows.diff %>% 
+             mutate(morpho_diff = cut(morpho_diff, 
+                                      breaks = epoch_breaks)),
+           aes(x = last, y=-2*bar_width,  fill = morpho_diff, color = morpho_diff), 
+           stat = "identity")+ 
+  geom_bar(data = age.windows.diff %>% 
+             mutate(eco_diff = cut(eco_diff, 
+                                   breaks = epoch_breaks, ordered_result=TRUE)),
+           aes(x = last, y=-bar_width, fill = eco_diff, color = eco_diff), 
+           stat = "identity") +
+  geom_segment(aes(x = 66.5, xend=1, y = -0.002), color = "white", linewidth=1.5) +
+  geom_segment(aes(x = 66.5, xend=1, y = -2*bar_width), color = "white", linewidth=1.5)+
+  geom_segment(aes(x = 66.5, xend=1, y = -3*bar_width), color = "white", linewidth=2) +
+  geom_segment(aes(x = 66.5, xend=1, y = -bar_width), color = "white", linewidth=1.5) + 
+  # geom_hline(yintercept = -2*bar_width, color = "white", linewidth=2) + 
+  # geom_hline(yintercept = -bar_width, color = "white", linewidth=1.5) + 
+  geom_hline(yintercept = 0, color = "gray", linewidth = 0.5)+ 
+  scale_color_manual(values = pal_epochs, guide = "none" ) + 
+  scale_fill_manual(values = pal_epochs, guide = "none" ) +
+  geom_label(aes(x = 0, 
+                 label = c("E-S", "M-S", "M-E"), 
+                 y = c(-bar_width/2, -bar_width*3/2, -bar_width*5/2)), size = 3) +
+  
+  ggnewscale::new_scale_color() +
+  
+  # geom_point(#data = age.windows_all.lat_all_data, 
+  #   aes(x=last, y=FAVA,color=data, group = paste0(data, data2)),
+  #   alpha=0.2, size=.5) + 
+  geom_line(data = age.windows_all.lat_all_data, 
+    aes(x=last, y=FAVA,color=data, group = paste0(data)),
+    linetype = 6,
+    alpha=0.3) +
+  theme_bw() + xlab("Window start (mya)") + 
+  scale_x_continuous(limits = c(66.5,-0.5), breaks = (6:0)*10, trans = "reverse")+ 
+  theme(legend.position = c(0.6,0.8), legend.title = element_blank(), legend.direction = "vertical")+ 
+  scale_color_manual(values = data_pal, guide="none", 
+                     labels = c("Ecogroup", "Morphogroup", "Species")) + 
+  ylab("FAVA") + 
+  
+  ggnewscale::new_scale_color() +
+  geom_point(data=species_in_either_group, 
+             aes(x = age, y = (mean_sp_num-2)/scale_factor, color=data2), 
+             alpha=0.8) + 
+  geom_line(data=species_in_either_group, 
+            aes(x = age, y = (mean_sp_num-2)/scale_factor, group=data2, color=data2),
+            alpha=0.8) + 
+  theme_bw() + 
+  # ylab("Mean number of species\nin each ecogroup") + 
+  scale_x_reverse() +
+  scale_y_continuous(breaks = seq(0,0.3,0.1), #limits = c(0,0.3),
+    sec.axis = sec_axis( trans=~.*scale_factor+2, 
+                                          breaks = seq(2,15,5),
+                                          name="Mean number of species\nin each category")) + 
+  # facet_wrap(~data2) + 
+  theme(strip.background = element_blank(), strip.text = element_text(size=12)) +
+  scale_color_manual(values = c("Ecogroup" = data_pal[[1]],
+                                "Morphogroup" = data_pal[[2]]), guide="none") + 
+  ylab("Temporal FAVA")
+species_in_either_group_plot
+
+# ggsave(plot = species_in_either_group_plot, filename = "../Figures/eco_morpho_species_time_windows_compare_species_in_categories.png", width = 30, height=20, scale = 0.2)
+```
+
+
+# Compare different sliding window widths
+
+
+```{r, fig.width=10}
+# Sliding window analysis - species
+age.windows_all.lat_6wide_species = 
+  FAVA::window_fava(relab_matrix = species_relab_0.5my_alldeg,
+                    window_size = 6,
+                    K = 335,
+                    time = "age")
+
+age.windows_all.lat_10wide_species = 
+  FAVA::window_fava(relab_matrix = species_relab_0.5my_alldeg,
+                    window_size = 10,
+                    K = 335,
+                    time = "age")
+
+age.windows_all.lat_14wide_species = 
+  FAVA::window_fava(relab_matrix = species_relab_0.5my_alldeg,
+                    window_size = 14,
+                    K = 335,
+                    time = "age")
+
+# Sliding window analysis - ecogroup
+age.windows_all.lat_6wide_ecogroup = 
+  FAVA::window_fava(relab_matrix = ecogroup_relab_0.5my_alldeg,
+                    window_size = 6,
+                    K = 18,
+                    time = "age")
+
+age.windows_all.lat_10wide_ecogroup = 
+  FAVA::window_fava(relab_matrix = ecogroup_relab_0.5my_alldeg,
+                    window_size = 10,
+                    K = 18,
+                    time = "age")
+
+age.windows_all.lat_14wide_ecogroup = 
+  FAVA::window_fava(relab_matrix = ecogroup_relab_0.5my_alldeg,
+                    window_size = 14,
+                    K = 18,
+                    time = "age")
+
+# Sliding window analysis - morphogroup
+age.windows_all.lat_6wide_morphogroup = 
+  FAVA::window_fava(relab_matrix = morphogroup_relab_0.5my_alldeg,
+                    window_size = 6,
+                    K = 19,
+                    time = "age")
+
+age.windows_all.lat_10wide_morphogroup = 
+  FAVA::window_fava(relab_matrix = morphogroup_relab_0.5my_alldeg,
+                    window_size = 10,
+                    K = 19,
+                    time = "age")
+
+age.windows_all.lat_14wide_morphogroup = 
+  FAVA::window_fava(relab_matrix = morphogroup_relab_0.5my_alldeg,
+                    window_size = 14,
+                    K = 19,
+                    time = "age")
+
+```
+
+
+```{r, fig.width=10}
+age.windows_all.lat_all_data = rbind(
+  age.windows_all.lat_6wide_species$window_data %>% 
+    transmute(window_index, w1, last=w6, species = FAVA) %>% 
+    left_join(age.windows_all.lat_6wide_ecogroup$window_data %>% 
+                transmute(window_index, w1, last=w6, ecogroup = FAVA))%>% 
+    left_join(age.windows_all.lat_6wide_morphogroup$window_data %>% 
+                transmute(window_index, w1, last=w6, morphogroup = FAVA)) %>%
+    mutate(n_windows = 6),
+  
+  age.windows_all.lat_10wide_species$window_data %>% 
+    transmute(window_index, w1, last=w10, species = FAVA) %>% 
+    left_join(age.windows_all.lat_10wide_ecogroup$window_data %>% 
+                transmute(window_index, w1, last=w10, ecogroup = FAVA))%>% 
+    left_join(age.windows_all.lat_10wide_morphogroup$window_data %>% 
+                transmute(window_index, w1, last=w10, morphogroup = FAVA)) %>%
+    mutate(n_windows = 10),
+  
+  age.windows_all.lat_14wide_species$window_data %>% 
+    transmute(window_index, w1, last=w14, species = FAVA) %>% 
+    left_join(age.windows_all.lat_14wide_ecogroup$window_data %>% 
+                transmute(window_index, w1, last=w14,ecogroup = FAVA))%>% 
+    left_join(age.windows_all.lat_14wide_morphogroup$window_data %>% 
+                transmute(window_index, w1, last=w14,morphogroup = FAVA)) %>%
+    mutate(n_windows = 14)) %>% 
+  pivot_longer(cols = c(species, ecogroup, morphogroup), 
+               names_to="data", values_to="FAVA")
+```
+
+We present results at three different window resolutions: windows including 6, 10, or 14 samples, with each sample representing the composition of the global foram community during 500,000 years. Each horizontal bar gives the temporal heterogeneity over the samples captured by the horizontal breadth of the bar, and different panels present different window resolutions. 
+
+```{r, fig.height=8}
+data_pal = PNWColors::pnw_palette("Bay", 3) %>% `names<-`(c("ecogroup", "morphogroup", "species"))
+
+plot_supp_bars = ggplot(age.windows_all.lat_all_data %>% 
+         pivot_longer(cols = c(w1, last), 
+                      names_to = "position", values_to = "mya"), 
+       aes(x=mya, y=FAVA, color=data, 
+           group=paste0(window_index, n_windows, FAVA))) + 
+  geom_line(linewidth=1, alpha=0.5)+
+  facet_grid(n_windows~.) + 
+  theme_bw() + xlab("Window start (mya)") + 
+  scale_x_reverse() + theme(legend.position = "bottom") + 
+  scale_color_manual(values = data_pal) + 
+  geom_point(aes(x = last), alpha = 0.8, size = 1, age.windows_all.lat_all_data) + 
+  geom_line(aes(x = last, group = data), alpha = 0.8, linewidth = 0.5, age.windows_all.lat_all_data) + 
+  ylab("Temporal FAVA")
+
+plot_supp_bars
+
+# ggsave("../Figures/fig1_windows_compare_bars.png", plot_supp_bars, width = 20, height = 25, scale = 0.35)
+```
+
