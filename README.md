@@ -9,7 +9,7 @@ If you have R and RStudio downloaded, you can open `Scripts/foram-fava.Rproj`, w
 Note that you will need to unzip `Data_raw/Data_Triton_v2_Maike_compressed/Triton_Binned_Trimmed.csv.zip` before analyzing this data set. 
 
 
-## Contents:
+## Scripts:
 
 ### `figure_compare_data.Rmd` 
 
