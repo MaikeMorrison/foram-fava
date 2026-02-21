@@ -4,6 +4,10 @@ Data and code accompanying:
 
 Morrison, M. L., Woodhouse, A., & Swain, A. (2026). Latitudinal dependence of stability trends in marine plankton in the Cenozoic. *bioRxiv*, 2026.02.11.705334. https://doi.org/10.64898/2026.02.11.705334
 
+If you have R and RStudio downloaded, you can open `Scripts/foram-fava.Rproj`, which will help keep file paths consistent. 
+
+Note that you will need to unzip `Data_raw/Data_Triton_v2_Maike_compressed/Triton_Binned_Trimmed.csv.zip` before analyzing this data set. 
+
 
 ## Contents:
 
